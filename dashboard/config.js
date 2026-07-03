@@ -1,0 +1,3 @@
+// Filled in once the Supabase project exists. See config.example.js.
+export const SUPABASE_URL = 'https://YOUR-PROJECT.supabase.co';
+export const SUPABASE_ANON_KEY = 'YOUR-ANON-KEY';
