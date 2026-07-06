@@ -9,26 +9,41 @@
 <body>
   <header class="page-header">
     <h1>Night Action Tracker</h1>
-    <p id="status" class="status">Connecting...</p>
+    <p id="status" class="status">Enter a game PIN to view its actions.</p>
   </header>
 
   <main>
-    <table id="submissions-table">
-      <thead>
-        <tr>
-          <th>Night</th>
-          <th>Channel</th>
-          <th>Submitted by</th>
-          <th>Role</th>
-          <th>Target</th>
-          <th>Raw message</th>
-          <th>Time</th>
-        </tr>
-      </thead>
-      <tbody id="submissions-body">
-        <tr><td colspan="7" class="empty">No submissions yet.</td></tr>
-      </tbody>
-    </table>
+    <section id="gate" class="gate">
+      <label class="field">
+        <span class="field-label">Game</span>
+        <select id="game-select"></select>
+      </label>
+      <label class="field">
+        <span class="field-label">PIN</span>
+        <input id="pin-input" type="password" autocomplete="off" placeholder="game PIN" />
+      </label>
+      <button id="unlock-btn" type="button" class="primary">View actions</button>
+      <p id="gate-error" class="gate-error"></p>
+    </section>
+
+    <div id="table-wrap" hidden>
+      <table id="submissions-table">
+        <thead>
+          <tr>
+            <th>Night</th>
+            <th>Channel</th>
+            <th>Submitted by</th>
+            <th>Role</th>
+            <th>Target</th>
+            <th>Raw message</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody id="submissions-body">
+          <tr><td colspan="7" class="empty">No submissions yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
   </main>
 
   <script type="module" src="app.js"></script>

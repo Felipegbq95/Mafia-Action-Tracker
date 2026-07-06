@@ -1,35 +1,24 @@
--- One-time seed for a single game. Edit the values, then paste into the
--- Supabase SQL editor and run (after db/schema.sql has been run once).
+-- One-time load of your "regular" players - the people who usually play, so
+-- the create-game screen can pre-select them and you don't re-type them each
+-- game. Edit the rows, paste into the Supabase SQL editor, run.
 --
--- This inserts a game, its players, and links every player to that game in
--- one shot, so you don't have to click rows into the table editor by hand.
+-- Games themselves are created through the app (admin screen), not here, so
+-- this file only seeds the player pool. Run it once; add stragglers later
+-- from the admin screen.
 --
--- Notes:
---  - display_name is what the parser fuzzy-matches action targets against.
---  - aliases are extra nicknames it should also match (use array[]::text[]
---    for none).
---  - discord_id is OPTIONAL. Fill it in to link who *submitted* each action
---    (right-click a user in Discord -> Copy User ID, Developer Mode on).
---    Leave it null and submissions still work, they just show the submitter
---    as unlinked. Target matching does not use it.
---  - Re-running this creates a second game; it's meant to be run once per
---    game. To start a new game later, set the old game's is_active = false
---    first, then run an edited copy of this.
+--  - display_name: the name the parser matches action targets against (use
+--    what players actually type when targeting each other).
+--  - aliases: extra nicknames to also match; array[]::text[] for none.
+--  - discord_id: optional; links who *submitted* an action. Right-click a
+--    user in Discord (Developer Mode on) -> Copy User ID. Null is fine.
+--
+-- Re-running is safe for new names; a duplicate discord_id will error
+-- (that column is unique), which just means that player already exists.
 
-with new_game as (
-  insert into games (name, is_active, current_night_number)
-  values ('REPLACE - name of this game', true, 1)
-  returning id
-),
-new_players as (
-  insert into players (display_name, discord_id, aliases)
-  values
-    ('REPLACE - Player One',   null, array['nickname1']),
-    ('REPLACE - Player Two',   null, array[]::text[]),
-    ('REPLACE - Player Three', null, array[]::text[])
-    -- add one row per player...
-  returning id
-)
-insert into game_players (game_id, player_id)
-select new_game.id, new_players.id
-from new_game cross join new_players;
+insert into players (display_name, aliases, is_regular, discord_id)
+values
+  ('REPLACE - Player One',   array['nickname1'], true, null),
+  ('REPLACE - Player Two',   array[]::text[],    true, null),
+  ('REPLACE - Player Three', array[]::text[],    true, null)
+  -- add one row per regular...
+;

@@ -56,8 +56,32 @@ functional skeleton to wire up and test against a real channel.
 - **Data layer**: Supabase (Postgres + realtime). Schema in
   `db/schema.sql`.
 - **Dashboard** (`dashboard/`): plain static page (no build step),
-  deployed via GitHub Pages, subscribed to Supabase realtime changes on
-  `submissions`.
+  deployed via GitHub Pages. It is PIN-gated: the viewer picks a game and
+  enters that game's PIN, and only then does the data load (see "Security
+  model"). It polls every ~10s rather than using live push, because a
+  PIN-gated feed cannot use Supabase realtime directly.
+
+## Security model
+
+The browser talks to Supabase with the **public anon key**, so the anon
+key must not be able to read the tables - otherwise anyone could bypass a
+PIN prompt and pull the data straight from the API. So:
+
+- Row Level Security is ON for every table with **no read policies**, which
+  denies the anon key all direct table access.
+- All browser access goes through `SECURITY DEFINER` database functions
+  (in `db/schema.sql`) that check a password/PIN *before* returning
+  anything. `dashboard_submissions(game_id, pin)` verifies the game PIN;
+  the `admin_*` functions verify a shared **host password**. Both are
+  stored only as bcrypt hashes (via `pgcrypto`).
+- The scraper uses the **service role key**, which bypasses RLS, so it
+  keeps writing normally.
+
+This makes the game PIN a real server-side lock, not a client-side
+curtain. PINs are required to be 6+ characters and the host password 8+,
+because an open, server-checked endpoint can be brute-forced if the secret
+is tiny (bcrypt's slowness is the main brake; a short numeric PIN would
+still be weak).
 
 ## Message parsing
 
@@ -116,20 +140,25 @@ role/ability names actually show up.
 2. **Server ID**: enable Developer Mode (Discord Settings -> Advanced),
    right-click the server icon -> Copy Server ID. That is
    `DISCORD_GUILD_ID`.
-3. **Supabase**: create a free-tier project, run `db/schema.sql` in the
-   SQL editor, insert a row into `games` for your current game (set
-   `is_active = true`), and add its players to `players` /
-   `game_players`.
+3. **Supabase**: create a free-tier project and run `db/schema.sql` in the
+   SQL editor (safe to re-run - it is idempotent). Then, once:
+   - Set the shared host password:
+     `select set_host_password('a-strong-host-password');`
+   - Load your regular players by editing and running `db/seed.sql`.
+   - Create a game (this also sets its dashboard PIN and links players):
+     `select admin_create_game('host-password', 'Game name', 'game-pin', array[]::uuid[]);`
+     Pass player ids in the array to add them, or use the admin UI later.
+     (Get ids from `select id, display_name from players;`.)
 4. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`,
    `DISCORD_GUILD_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. The
    optional `DISCORD_EXCLUDE_CHANNELS` (comma-separated channel names)
    defaults to `general,dead-chat,dead,graveyard,spectators`; adjust it to
    match what your server actually calls its non-action channels.
-5. Copy `dashboard/config.example.js` to `dashboard/config.js` (already
-   present as a placeholder) and fill in `SUPABASE_URL` and
-   `SUPABASE_ANON_KEY` - the anon key is meant to be public, row-level
-   security (already set up in the schema) is what actually protects
-   the data. Do not put the service role key here.
+5. Fill in `dashboard/config.js` (already present as a placeholder) with
+   `SUPABASE_URL` and `SUPABASE_ANON_KEY`. The anon key is meant to be
+   public - it can only call the gated functions, not read the tables (see
+   "Security model"). Do not put the service role key here. To view the
+   dashboard, pick the game and enter its PIN.
 
 ### Running the scraper
 

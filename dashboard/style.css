@@ -14,6 +14,12 @@
   box-sizing: border-box;
 }
 
+/* Author display rules (.gate uses flex) otherwise beat the user-agent
+   [hidden] rule, so a hidden element would still show. Force it. */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   padding: 32px 24px;
@@ -80,6 +86,74 @@ td.empty {
   font-family: ui-monospace, "JetBrains Mono", monospace;
   color: var(--text-dim);
   font-size: 0.85rem;
+}
+
+.gate {
+  max-width: 380px;
+  margin: 48px auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.gate select,
+.gate input {
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.gate input:focus,
+.gate select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.primary:hover {
+  background: #ef5a63;
+}
+
+button.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gate-error {
+  margin: 0;
+  min-height: 1.2em;
+  color: var(--accent);
+  font-size: 0.88rem;
 }
 
 .needs-review {
