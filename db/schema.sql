@@ -8,7 +8,7 @@ create table if not exists games (
   name text not null,
   is_active boolean not null default true,
   -- Bumped manually (e.g. via the Supabase table editor) at the start of
-  -- each night phase. There's no in-bot command for this yet.
+  -- each night phase. There's no automated bump yet.
   current_night_number int not null default 1,
   created_at timestamptz not null default now()
 );
@@ -60,8 +60,8 @@ create index if not exists submissions_needs_review_idx on submissions (needs_re
 alter publication supabase_realtime add table submissions;
 
 -- The dashboard reads with the public anon key, so it needs read-only
--- access via RLS. The bot writes with the service role key, which bypasses
--- RLS entirely, so no write policies are added here on purpose.
+-- access via RLS. The scraper writes with the service role key, which
+-- bypasses RLS entirely, so no write policies are added here on purpose.
 alter table games enable row level security;
 alter table players enable row level security;
 alter table game_players enable row level security;

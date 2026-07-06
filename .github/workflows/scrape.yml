@@ -1,0 +1,28 @@
+name: Scrape night actions
+
+on:
+  # Run on demand from the Actions tab any time.
+  workflow_dispatch: {}
+  # Best-effort polling. GitHub's scheduler has a ~5 minute floor and often
+  # runs late under load, so this is "near-live", not instant. When you are
+  # not running a game, disable this workflow from the Actions tab (one
+  # click, no commit) so it stops running every few minutes - and note that
+  # GitHub auto-disables scheduled workflows after 60 days of repo inactivity.
+  schedule:
+    - cron: '*/5 * * * *'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --omit=dev
+      - run: npm run scrape
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          DISCORD_NIGHT_ACTIONS_CHANNEL_ID: ${{ secrets.DISCORD_NIGHT_ACTIONS_CHANNEL_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

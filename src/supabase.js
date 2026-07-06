@@ -12,7 +12,7 @@ export function createSupabase({ url, serviceRoleKey } = {}) {
 export async function getActiveGame(supabase) {
   const { data, error } = await supabase
     .from('games')
-    .select('id, name, is_active, current_night_number')
+    .select('id, name, is_active, current_night_number, created_at')
     .eq('is_active', true)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -35,21 +35,31 @@ export async function getRoster(supabase, gameId) {
   }));
 }
 
-export async function findPlayerByDiscordId(supabase, discordId) {
+/**
+ * Highest Discord message id already recorded for this channel, used as the
+ * forward-paging cursor so each scrape only fetches new messages. Returns
+ * null on a cold start (nothing recorded yet). Snowflake ids sort by time,
+ * so the max id is the most recently processed message.
+ */
+export async function getLatestMessageId(supabase, channelId) {
   const { data, error } = await supabase
-    .from('players')
-    .select('id, discord_id, display_name, aliases')
-    .eq('discord_id', discordId)
-    .maybeSingle();
+    .from('submissions')
+    .select('discord_message_id')
+    .eq('discord_channel_id', channelId);
   if (error) throw error;
-  return data;
+  if (!data || data.length === 0) return null;
+  return data.reduce(
+    (max, row) => (BigInt(row.discord_message_id) > BigInt(max) ? row.discord_message_id : max),
+    data[0].discord_message_id,
+  );
 }
 
 export async function insertSubmission(supabase, submission) {
   const { error } = await supabase.from('submissions').insert(submission);
   if (error && error.code !== '23505') {
-    // 23505 = unique_violation on discord_message_id; a message that was
-    // already recorded (e.g. reprocessed on bot restart) is not an error.
+    // 23505 = unique_violation on discord_message_id; a message already
+    // recorded on a previous scrape run is expected, not an error.
     throw error;
   }
+  return !error; // false when the row was a duplicate we skipped
 }

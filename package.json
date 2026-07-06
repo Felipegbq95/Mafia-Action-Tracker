@@ -1,17 +1,16 @@
 {
   "name": "mafia-action-tracker",
   "version": "0.1.0",
-  "description": "Discord bot + live dashboard that records Mafia night-phase role actions from a Discord channel.",
+  "description": "Scraper + live dashboard that records Mafia night-phase role actions from a Discord channel.",
   "private": true,
   "type": "module",
-  "main": "bot/index.js",
+  "main": "src/scrape.js",
   "scripts": {
-    "start": "node bot/index.js",
+    "scrape": "node src/scrape.js",
     "test": "node --test"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
-    "discord.js": "^14.16.3",
     "dotenv": "^16.4.5"
   }
 }
