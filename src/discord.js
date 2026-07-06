@@ -28,6 +28,31 @@ function bySnowflakeAsc(a, b) {
   return BigInt(a.id) < BigInt(b.id) ? -1 : 1;
 }
 
+const GUILD_TEXT = 0; // Discord channel type for a normal text channel.
+
+/**
+ * Lists the guild's text channels. Group/private channels are included as
+ * long as the bot can see them (grant it Administrator on a per-game server
+ * so it sees the private action channels). Returns { id, name }.
+ */
+export async function listTextChannels(guildId, token = process.env.DISCORD_TOKEN) {
+  requireToken(token);
+  const url = new URL(`${API_BASE}/guilds/${guildId}/channels`);
+  const res = await fetch(url, { headers: { Authorization: `Bot ${token}` } });
+  if (res.status === 429) {
+    const retryAfter = Number(res.headers.get('retry-after') ?? '1');
+    await new Promise((resolve) => setTimeout(resolve, (retryAfter + 0.5) * 1000));
+    return listTextChannels(guildId, token);
+  }
+  if (!res.ok) {
+    throw new Error(`Discord API ${res.status}: ${await res.text()}`);
+  }
+  const channels = await res.json();
+  return channels
+    .filter((c) => c.type === GUILD_TEXT)
+    .map((c) => ({ id: c.id, name: c.name }));
+}
+
 async function getPage(channelId, params, token) {
   const url = new URL(`${API_BASE}/channels/${channelId}/messages`);
   url.searchParams.set('limit', String(PAGE_LIMIT));

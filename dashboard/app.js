@@ -13,8 +13,8 @@ if (SUPABASE_URL.includes('YOUR-PROJECT') || SUPABASE_ANON_KEY.includes('YOUR-AN
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const SUBMISSION_SELECT = `
-  id, night_number, raw_message, role_raw, role_canonical, target_raw,
-  needs_review, submitted_at,
+  id, night_number, channel_name, raw_message, role_raw, role_canonical,
+  target_raw, needs_review, submitted_at,
   submitter:submitter_player_id (display_name),
   target:target_player_id (display_name)
 `;
@@ -38,6 +38,7 @@ function renderRow(row) {
   const targetDisplay = row.target?.display_name ?? `${row.target_raw ?? '?'} (unresolved)`;
 
   tr.appendChild(cell(String(row.night_number)));
+  tr.appendChild(cell(row.channel_name ? `#${row.channel_name}` : ''));
   tr.appendChild(cell(submitterName));
   tr.appendChild(cell(roleDisplay, row.role_canonical ? '' : 'unresolved'));
   tr.appendChild(cell(targetDisplay, row.target?.display_name ? '' : 'unresolved'));
@@ -58,7 +59,7 @@ function renderRow(row) {
 function renderAll(rows) {
   bodyEl.innerHTML = '';
   if (rows.length === 0) {
-    bodyEl.innerHTML = '<tr><td colspan="6" class="empty">No submissions yet.</td></tr>';
+    bodyEl.innerHTML = '<tr><td colspan="7" class="empty">No submissions yet.</td></tr>';
     return;
   }
   for (const row of rows) {

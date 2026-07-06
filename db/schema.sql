@@ -36,6 +36,7 @@ create table if not exists submissions (
 
   discord_message_id text not null,
   discord_channel_id text not null,
+  channel_name text,
   submitted_at timestamptz not null default now(),
 
   submitter_player_id uuid references players(id),
@@ -55,6 +56,8 @@ create table if not exists submissions (
 
 create index if not exists submissions_game_night_idx on submissions (game_id, night_number);
 create index if not exists submissions_needs_review_idx on submissions (needs_review) where needs_review;
+-- Per-channel cursor lookup (highest message id seen per channel).
+create index if not exists submissions_channel_idx on submissions (discord_channel_id);
 
 -- Enables the dashboard's realtime subscription.
 alter publication supabase_realtime add table submissions;

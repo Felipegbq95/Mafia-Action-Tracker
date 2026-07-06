@@ -5,10 +5,11 @@ submissions from a Discord channel, replacing manual spreadsheet
 transcription. Sibling project to
 [Mafia Vote Parser](https://github.com/Felipegbq95/Mafia-Vote-Parser).
 
-Players submit their night action by bolding a message in the
-night-actions channel, e.g. `**cop: Axatar**`. A scraper reads the
-channel over Discord's REST API, parses the submissions, and writes them
-to Supabase; the dashboard subscribes to that table and updates live.
+Each game runs in its own dedicated Discord server, where players submit
+night actions by bolding a message in their private channel, e.g.
+`**cop: Axatar**`. A scraper reads every text channel in that server over
+Discord's REST API, parses the submissions, and writes them to Supabase;
+the dashboard subscribes to that table and updates live.
 
 ## How it reads Discord (no always-on bot)
 
@@ -24,6 +25,13 @@ would be a self-bot, which is against Discord's ToS and can get your
 account banned - so we still create a bot application, we just do not
 host it.
 
+Because each game gets a fresh, dedicated server, the scraper just
+auto-discovers every text channel in it - no per-game list of channel
+IDs to maintain. Two channels' worth of chatter (general, dead chat) are
+skipped by name, and only bolded, action-shaped messages are recorded
+(see "Message parsing" below), so casual talk in the private channels
+does not pollute the results.
+
 ## Status
 
 Scaffolded, not yet run against a real Discord server or Supabase
@@ -38,11 +46,13 @@ functional skeleton to wire up and test against a real channel.
 ## Architecture
 
 - **Scraper** (`src/`): Node.js, no runtime Discord library. `src/discord.js`
-  pages through channel history over REST; `src/scrape.js` runs the parser
-  over each message and writes a row per submission to Supabase. It tracks
-  a cursor (the newest message id already recorded) so each run only
-  fetches new messages, and re-runs are safe (duplicate inserts are
-  ignored via a unique constraint).
+  lists the server's text channels and pages through each one's history
+  over REST; `src/scrape.js` runs the parser over every message and writes
+  a row per recorded submission to Supabase. It tracks a per-channel cursor
+  (the newest message id already recorded in that channel) so each run only
+  fetches new messages, and re-runs are safe (duplicate inserts are ignored
+  via a unique constraint). A channel the bot cannot read is skipped with a
+  warning rather than aborting the run.
 - **Data layer**: Supabase (Postgres + realtime). Schema in
   `db/schema.sql`.
 - **Dashboard** (`dashboard/`): plain static page (no build step),
@@ -75,6 +85,17 @@ Based on what you described, submissions vary in format:
    `needs_review = true` rather than dropped, so it surfaces on the
    dashboard for you to fix by hand.
 
+Because the private channels double as casual chat, the scraper only
+**records** a message that (a) contains a bold span and (b) looks like an
+action - it resolves to a known role/ability, matches a player, or has a
+`Role: Target` separator. Non-bolded chatter and stray emphasis
+(`I **really** don't know`) are skipped entirely. The trade-off: an
+action a player forgets to bold is missed. That is the right call once
+chatty channels are in scope - otherwise the dashboard fills with noise -
+and it matches the game convention that actions are bolded. This
+threshold lives in `isRecordableAction` in `src/parser.js` and is easy to
+loosen once you have seen real logs.
+
 **`src/roleAliases.js` is a first draft, written without seeing real
 game messages.** Mafia rulesets vary a lot between games - edit that
 file (or move it to a Supabase table if per-game customization turns
@@ -85,18 +106,26 @@ role/ability names actually show up.
 
 1. **Discord bot token**: create an application + bot user in the
    [Discord Developer Portal](https://discord.com/developers/applications),
-   enable the "Message Content" privileged intent, invite it to your
-   server with permission to read the night-actions channel. (The bot
-   never needs to be "online" - the token is just used to authenticate
-   REST calls.)
-2. **Supabase**: create a free-tier project, run `db/schema.sql` in the
+   enable the "Message Content" privileged intent (Bot page), and invite
+   it to the game server. Use **guild install** (not user install), and
+   since the action channels are private, give the bot **Administrator**
+   so it can read them all without per-channel setup - fine for a
+   disposable per-game server. In OAuth2 -> URL Generator, tick scope
+   `bot` and permission `Administrator`, open the URL, authorize. (The bot
+   never needs to be "online" - the token just authenticates REST calls.)
+2. **Server ID**: enable Developer Mode (Discord Settings -> Advanced),
+   right-click the server icon -> Copy Server ID. That is
+   `DISCORD_GUILD_ID`.
+3. **Supabase**: create a free-tier project, run `db/schema.sql` in the
    SQL editor, insert a row into `games` for your current game (set
    `is_active = true`), and add its players to `players` /
    `game_players`.
-3. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`,
-   `DISCORD_NIGHT_ACTIONS_CHANNEL_ID`, `SUPABASE_URL`,
-   `SUPABASE_SERVICE_ROLE_KEY`.
-4. Copy `dashboard/config.example.js` to `dashboard/config.js` (already
+4. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`,
+   `DISCORD_GUILD_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. The
+   optional `DISCORD_EXCLUDE_CHANNELS` (comma-separated channel names)
+   defaults to `general,dead-chat,dead,graveyard,spectators`; adjust it to
+   match what your server actually calls its non-action channels.
+5. Copy `dashboard/config.example.js` to `dashboard/config.js` (already
    present as a placeholder) and fill in `SUPABASE_URL` and
    `SUPABASE_ANON_KEY` - the anon key is meant to be public, row-level
    security (already set up in the schema) is what actually protects
@@ -110,9 +139,9 @@ role/ability names actually show up.
 - **On a schedule (no hosting)**: `.github/workflows/scrape.yml` runs
   `npm run scrape` on a cron with zero servers to maintain. Add your
   four env values as repository secrets (Settings -> Secrets and
-  variables -> Actions): `DISCORD_TOKEN`,
-  `DISCORD_NIGHT_ACTIONS_CHANNEL_ID`, `SUPABASE_URL`,
-  `SUPABASE_SERVICE_ROLE_KEY`. GitHub's scheduler has a ~5 minute floor
+  variables -> Actions): `DISCORD_TOKEN`, `DISCORD_GUILD_ID`,
+  `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. GitHub's scheduler has a
+  ~5 minute floor
   and runs best-effort (often a few minutes late), so it is near-live,
   not instant. When you are not running a game, disable the workflow from
   the Actions tab so it stops polling; you can still trigger it manually
@@ -127,11 +156,19 @@ deploy.
 
 ## Known limitations / open items
 
-- **Cold start**: the first scrape (before anything is recorded) pulls
-  recent history back to the active game's creation time, capped at 1000
-  messages, so it does not scrape the entire channel. If a night had more
-  than 1000 messages before the first scrape, run the scraper early or
-  raise the cap in `src/discord.js`.
+- **Cold start**: the first scrape of a channel (before anything is
+  recorded for it) pulls recent history back to the active game's creation
+  time, capped at 1000 messages, so it does not scrape a channel's entire
+  history. If a channel had more than 1000 messages before the first
+  scrape, run the scraper early or raise the cap in `src/discord.js`.
+- **False positives from bolded names**: because a bolded player name
+  counts as an action signal, someone bolding another player's name in
+  group/dead chat ("I think **Axatar** is scum") can create a
+  `needs_review` row. Skim and dismiss those on the dashboard; tighten
+  `isRecordableAction` if it happens a lot.
+- **Bot access**: the bot only reads channels it can see. Administrator
+  covers this; without it, private channels are silently skipped (logged
+  as a warning in the run output).
 - Night number (`games.current_night_number`) is bumped manually via the
   Supabase table editor between nights - no automated bump yet.
 - If a single message contains more than one bolded action, only the

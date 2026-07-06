@@ -124,12 +124,12 @@ function splitRoleAndTarget(spanText) {
       const targetRaw = roleResolved.remainder
         ? `${roleResolved.remainder} ${targetPhrase}`.trim()
         : targetPhrase.trim();
-      return { roleRaw: rolePhrase.trim(), roleCanonical: roleResolved.canonical, targetRaw };
+      return { roleRaw: rolePhrase.trim(), roleCanonical: roleResolved.canonical, targetRaw, hadSeparator: true };
     }
     // Separator present but the left side isn't a known role/ability -
     // still report it, just unresolved, so it surfaces for manual review
     // instead of disappearing.
-    return { roleRaw: rolePhrase.trim(), roleCanonical: null, targetRaw: targetPhrase.trim() };
+    return { roleRaw: rolePhrase.trim(), roleCanonical: null, targetRaw: targetPhrase.trim(), hadSeparator: true };
   }
 
   const roleResolved = resolveRole(trimmed);
@@ -138,10 +138,11 @@ function splitRoleAndTarget(spanText) {
       roleRaw: roleResolved.raw,
       roleCanonical: roleResolved.canonical,
       targetRaw: roleResolved.remainder,
+      hadSeparator: false,
     };
   }
 
-  return { roleRaw: null, roleCanonical: null, targetRaw: trimmed };
+  return { roleRaw: null, roleCanonical: null, targetRaw: trimmed, hadSeparator: false };
 }
 
 /**
@@ -159,13 +160,23 @@ export function extractActionSpans(content) {
 /**
  * Parses a raw Discord message into one or more candidate submissions.
  * roster: array of { id, displayName, aliases? } used for fuzzy target matching.
+ *
+ * Each result carries enough signal for the caller to decide whether to
+ * record it (see isRecordableAction). The parser itself stays lenient and
+ * reports everything it finds; filtering out chatter is a policy decision
+ * left to the scraper, since it depends on the channel being read.
  */
 export function parseMessage(content, roster = []) {
   const { spans, fellBackToFullMessage } = extractActionSpans(content);
 
   return spans.map((span) => {
-    const { roleRaw, roleCanonical, targetRaw } = splitRoleAndTarget(span);
+    const { roleRaw, roleCanonical, targetRaw, hadSeparator } = splitRoleAndTarget(span);
     const targetMatch = targetRaw ? matchPlayer(targetRaw, roster) : null;
+
+    // "Looks like an action" = has at least one concrete action signal:
+    // a recognized role/ability, a matched player, or a Role: Target
+    // separator. Plain bolded emphasis ("**really**") has none of these.
+    const looksLikeAction = Boolean(roleCanonical) || Boolean(targetMatch) || hadSeparator;
 
     return {
       raw: span,
@@ -175,7 +186,24 @@ export function parseMessage(content, roster = []) {
         player: targetMatch?.player ?? null,
         score: targetMatch?.score ?? null,
       },
+      // fromBold is false only on the no-bold fallback (the whole message).
+      fromBold: !fellBackToFullMessage,
+      hadSeparator,
+      looksLikeAction,
       needsReview: fellBackToFullMessage || !roleCanonical || !targetMatch,
     };
   });
+}
+
+/**
+ * Policy for reading mixed-use channels (private action channels double as
+ * casual chat): only record a submission that came from an actual bold span
+ * AND looks like an action. This drops non-bolded chatter and stray
+ * emphasis while still capturing bolded actions with an unknown role or a
+ * typo'd target (which are recorded with needsReview = true for manual
+ * fixing). The cost is that a genuine action a player forgot to bold is
+ * missed - an intentional trade to keep the signal-to-noise usable.
+ */
+export function isRecordableAction(action) {
+  return action.fromBold && action.looksLikeAction;
 }

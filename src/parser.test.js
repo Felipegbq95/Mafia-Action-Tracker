@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseMessage, matchPlayer } from './parser.js';
+import { parseMessage, matchPlayer, isRecordableAction } from './parser.js';
 
 const ROSTER = [
   { id: '1', displayName: 'Axatar' },
@@ -73,6 +73,37 @@ test('message with no action content at all is still flagged, never throws', () 
   const results = parseMessage('good luck everyone tonight', ROSTER);
   assert.equal(results.length, 1);
   assert.equal(results[0].needsReview, true);
+});
+
+// --- recording policy (what the scraper actually persists) ---
+
+test('a clean bolded action is recordable', () => {
+  const [result] = parseMessage('**cop: Axatar**', ROSTER);
+  assert.equal(isRecordableAction(result), true);
+});
+
+test('a bolded action with unknown role is still recordable (for review)', () => {
+  const [result] = parseMessage('**wizard: Axatar**', ROSTER);
+  assert.equal(result.needsReview, true);
+  assert.equal(isRecordableAction(result), true);
+});
+
+test('bolding just a player name is recordable (target-only action)', () => {
+  const [result] = parseMessage('**Axatar**', ROSTER);
+  assert.equal(result.target.player.id, '1');
+  assert.equal(isRecordableAction(result), true);
+});
+
+test('non-bolded chatter is not recordable', () => {
+  const [result] = parseMessage('cop: Axatar', ROSTER);
+  assert.equal(result.fromBold, false);
+  assert.equal(isRecordableAction(result), false);
+});
+
+test('bolded plain emphasis (no action signal) is not recordable', () => {
+  const [result] = parseMessage("I **really** don't know who to pick", ROSTER);
+  assert.equal(result.looksLikeAction, false);
+  assert.equal(isRecordableAction(result), false);
 });
 
 test('matchPlayer returns null below the similarity threshold', () => {

@@ -23,6 +23,6 @@ jobs:
       - run: npm run scrape
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-          DISCORD_NIGHT_ACTIONS_CHANNEL_ID: ${{ secrets.DISCORD_NIGHT_ACTIONS_CHANNEL_ID }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
