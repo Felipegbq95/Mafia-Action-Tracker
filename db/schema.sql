@@ -300,15 +300,21 @@ $$;
 grant execute on function list_games() to anon, authenticated;
 
 -- The PIN-gated read. Wrong or missing PIN raises, so the client can tell
--- "wrong PIN" apart from "no submissions yet".
-create or replace function dashboard_submissions(p_game_id uuid, p_pin text)
+-- "wrong PIN" apart from "no submissions yet". Returns player ids as well as
+-- names so the graph view can map each action to roster nodes reliably.
+-- (Dropped first because the return columns changed and Postgres will not
+-- replace a function with a different return type.)
+drop function if exists dashboard_submissions(uuid, text);
+create function dashboard_submissions(p_game_id uuid, p_pin text)
 returns table (
   id uuid,
   night_number int,
   channel_name text,
+  submitter_player_id uuid,
   submitter_name text,
   role_raw text,
   role_canonical text,
+  target_player_id uuid,
   target_name text,
   target_raw text,
   raw_message text,
@@ -332,9 +338,11 @@ begin
       s.id,
       s.night_number,
       s.channel_name,
+      s.submitter_player_id,
       sp.display_name,
       s.role_raw,
       s.role_canonical,
+      s.target_player_id,
       tp.display_name,
       s.target_raw,
       s.raw_message,
@@ -348,3 +356,29 @@ begin
 end;
 $$;
 grant execute on function dashboard_submissions(uuid, text) to anon, authenticated;
+
+-- PIN-gated roster for a game, so the graph can show every player as a node
+-- (including those who have not submitted yet).
+create or replace function dashboard_roster(p_game_id uuid, p_pin text)
+returns table (id uuid, display_name text)
+language plpgsql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_hash text;
+begin
+  select pin_hash into v_hash from games where id = p_game_id;
+  if v_hash is null or v_hash <> crypt(p_pin, v_hash) then
+    raise exception 'invalid pin' using errcode = '28000';
+  end if;
+
+  return query
+    select p.id, p.display_name
+    from game_players gp
+    join players p on p.id = gp.player_id
+    where gp.game_id = p_game_id
+    order by p.display_name;
+end;
+$$;
+grant execute on function dashboard_roster(uuid, text) to anon, authenticated;

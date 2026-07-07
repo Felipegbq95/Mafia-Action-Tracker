@@ -59,7 +59,15 @@ functional skeleton to wire up and test against a real channel.
   deployed via GitHub Pages. It is PIN-gated: the viewer picks a game and
   enters that game's PIN, and only then does the data load (see "Security
   model"). It polls every ~10s rather than using live push, because a
-  PIN-gated feed cannot use Supabase realtime directly.
+  PIN-gated feed cannot use Supabase realtime directly. The main view is a
+  night-action graph: every player is a node on a ring, and each action is
+  a colored arrow from actor to target (per night, with a night selector).
+  Hovering a player highlights their actions; players who have not
+  submitted are dimmed; actions that did not parse cleanly are surfaced in
+  a "needs attention" panel. A plain list view is available via a toggle.
+  Note it shows *actions only* - it does not compute outcomes (who died,
+  whether a kill was blocked), because that depends on per-game role rules
+  the app does not model.
 
 ## Security model
 

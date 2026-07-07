@@ -26,24 +26,35 @@
       <p id="gate-error" class="gate-error"></p>
     </section>
 
-    <div id="table-wrap" hidden>
-      <table id="submissions-table">
-        <thead>
-          <tr>
-            <th>Night</th>
-            <th>Channel</th>
-            <th>Submitted by</th>
-            <th>Role</th>
-            <th>Target</th>
-            <th>Raw message</th>
-            <th>Time</th>
-          </tr>
-        </thead>
-        <tbody id="submissions-body">
-          <tr><td colspan="7" class="empty">No submissions yet.</td></tr>
-        </tbody>
-      </table>
-    </div>
+    <section id="board" hidden>
+      <div class="toolbar">
+        <div id="night-tabs" class="night-tabs"></div>
+        <div class="spacer"></div>
+        <button id="view-toggle" type="button" class="ghost">List view</button>
+      </div>
+
+      <div id="web-view" class="web-view">
+        <div class="graph-wrap">
+          <svg id="graph" viewBox="0 0 900 640" role="img" aria-label="Night action graph"></svg>
+          <div id="legend" class="graph-legend"></div>
+        </div>
+        <aside id="details" class="details">
+          <p class="details-hint">Hover a player to see their action.</p>
+        </aside>
+      </div>
+
+      <div id="list-view" class="table-wrap" hidden>
+        <table>
+          <thead>
+            <tr>
+              <th>Night</th><th>Channel</th><th>Submitted by</th>
+              <th>Role</th><th>Target</th><th>Raw message</th><th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="submissions-body"></tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <script type="module" src="app.js"></script>
