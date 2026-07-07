@@ -1,24 +1,26 @@
--- One-time load of your "regular" players - the people who usually play, so
--- the create-game screen can pre-select them and you don't re-type them each
--- game. Edit the rows, paste into the Supabase SQL editor, run.
+-- Optional: create a test game with a couple of players and abilities using
+-- the new functions, so you can validate the schema before the create-game UI
+-- exists. Run AFTER schema.sql. Change the PIN first.
 --
--- Games themselves are created through the app (admin screen), not here, so
--- this file only seeds the player pool. Run it once; add stragglers later
--- from the admin screen.
---
---  - display_name: the name the parser matches action targets against (use
---    what players actually type when targeting each other).
---  - aliases: extra nicknames to also match; array[]::text[] for none.
---  - discord_id: optional; links who *submitted* an action. Right-click a
---    user in Discord (Developer Mode on) -> Copy User ID. Null is fine.
---
--- Re-running is safe for new names; a duplicate discord_id will error
--- (that column is unique), which just means that player already exists.
+-- Watch the output for the "Created game <id> with pin <pin>" notice - you'll
+-- use that game id + PIN to open it (and to test game_data / archive_game).
 
-insert into players (display_name, aliases, is_regular, discord_id)
-values
-  ('REPLACE - Player One',   array['nickname1'], true, null),
-  ('REPLACE - Player Two',   array[]::text[],    true, null),
-  ('REPLACE - Player Three', array[]::text[],    true, null)
-  -- add one row per regular...
-;
+do $$
+declare
+  gid uuid;
+  pin text := 'change-me-123';
+begin
+  gid := create_game('Test Game', pin);
+
+  perform upsert_player(gid, pin, null, 'Axatar',  'axatar',  array['joe']);
+  perform upsert_player(gid, pin, null, 'Bramble', 'bramble', array['bram']);
+  perform upsert_player(gid, pin, null, 'Cortez',  'cortez',  array[]::text[]);
+
+  perform upsert_ability(gid, pin, null, 'Investigate',
+    array['cop','check','investigate'], 'Learns the target''s alignment', 'none', null);
+  perform upsert_ability(gid, pin, null, 'Roleblock',
+    array['block','roleblock'], 'Cancels the target''s action', 'roleblock',
+    'You were roleblocked last night and were unable to act.');
+
+  raise notice 'Created game % with pin %', gid, pin;
+end $$;

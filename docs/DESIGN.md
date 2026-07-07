@@ -11,6 +11,23 @@ shared-channel actions to players, fix targets, add/delete, set results) and the
 web graph visualizes the current state. It is not a passive live feed - the host
 adjudicates.
 
+## Game lifecycle
+
+- **Active:** has a PIN, fully editable, and is the scraper's target. Only one
+  game is active at a time (maps to the current Discord server).
+- **Archived (finished):** "Finish game" removes the PIN and locks editing. The
+  game becomes **public read-only** - anyone can open it and view the final
+  board without a PIN. No further edits or scraping.
+
+## Night windowing (planned, not built yet)
+
+Only actions from the current night should count. The forum thread records exactly
+when the day ended and the night started/ends. Plan: the sibling **Vote Parser**
+(which already reads the thread and detects day/night boundaries) publishes the
+current night's start/end timestamps into the same Supabase, keyed by game; this
+app filters actions to that window. Until then, the game can carry a manually-set
+night start/end. Deferred - noted so it isn't lost.
+
 ## Access model (simple, no admin tier)
 
 - Anyone who opens the app sees the list of games, or can **Create game**
