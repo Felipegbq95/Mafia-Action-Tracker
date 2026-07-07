@@ -9,11 +9,12 @@ export function createSupabase({ url, serviceRoleKey } = {}) {
   return createClient(resolvedUrl, resolvedKey, { auth: { persistSession: false } });
 }
 
+// The one game the scraper writes to: the most recent still-active game.
 export async function getActiveGame(supabase) {
   const { data, error } = await supabase
     .from('games')
-    .select('id, name, is_active, current_night_number, created_at')
-    .eq('is_active', true)
+    .select('id, name, current_night_number, created_at')
+    .eq('status', 'active')
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -21,31 +22,33 @@ export async function getActiveGame(supabase) {
   return data;
 }
 
-export async function getRoster(supabase, gameId) {
+export async function getPlayers(supabase, gameId) {
   const { data, error } = await supabase
-    .from('game_players')
-    .select('players(id, discord_id, display_name, aliases)')
+    .from('players')
+    .select('id, display_name, channel_name, aliases')
     .eq('game_id', gameId);
   if (error) throw error;
-  return (data ?? []).map((row) => ({
-    id: row.players.id,
-    discordId: row.players.discord_id,
-    displayName: row.players.display_name,
-    aliases: row.players.aliases ?? [],
-  }));
+  return data ?? [];
 }
 
-/**
- * Highest Discord message id already recorded for this channel, used as the
- * forward-paging cursor so each scrape only fetches new messages. Returns
- * null on a cold start (nothing recorded yet). Snowflake ids sort by time,
- * so the max id is the most recently processed message.
- */
-export async function getLatestMessageId(supabase, channelId) {
+export async function getAbilities(supabase, gameId) {
   const { data, error } = await supabase
-    .from('submissions')
+    .from('abilities')
+    .select('id, name, aliases, effect_text, computable_type, splash_text')
+    .eq('game_id', gameId);
+  if (error) throw error;
+  return data ?? [];
+}
+
+// Highest Discord message id already recorded for a channel in this game - the
+// forward-paging cursor so each scrape only fetches new messages.
+export async function getLatestMessageId(supabase, gameId, channelName) {
+  const { data, error } = await supabase
+    .from('actions')
     .select('discord_message_id')
-    .eq('discord_channel_id', channelId);
+    .eq('game_id', gameId)
+    .eq('source_channel', channelName)
+    .not('discord_message_id', 'is', null);
   if (error) throw error;
   if (!data || data.length === 0) return null;
   return data.reduce(
@@ -54,12 +57,12 @@ export async function getLatestMessageId(supabase, channelId) {
   );
 }
 
-export async function insertSubmission(supabase, submission) {
-  const { error } = await supabase.from('submissions').insert(submission);
+export async function insertAction(supabase, action) {
+  const { error } = await supabase.from('actions').insert(action);
   if (error && error.code !== '23505') {
-    // 23505 = unique_violation on discord_message_id; a message already
-    // recorded on a previous scrape run is expected, not an error.
+    // 23505 = unique_violation on (game_id, discord_message_id); a message
+    // already recorded on a previous scrape is expected, not an error.
     throw error;
   }
-  return !error; // false when the row was a duplicate we skipped
+  return !error;
 }

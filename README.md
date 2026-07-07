@@ -101,38 +101,36 @@ Based on what you described, submissions vary in format:
 - Sometimes players use the role name (`cop`), sometimes the ability
   name (`investigate`).
 
-`src/parser.js` handles all of these:
+**Actor attribution is by channel, not message author** (see docs/DESIGN.md):
+a message in a player's personal channel is attributed to that player; a
+message in a shared channel (mafia, duos) is captured with a null actor for
+the host to assign. `src/scrape.js` handles that; `src/parser.js` only extracts
+"what ability, on whom" from the message text.
 
-1. Extracts every `**bolded**` span from the message (falls back to the
-   full message text, flagged low-confidence, if nothing is bolded -
-   better to surface a possible miss than silently drop it).
-2. Splits on a separator if one is present; if not, tries to match a
-   leading word against the role/ability alias list and treats the rest
-   as the target.
-3. Resolves the role/ability phrase against `src/roleAliases.js`.
-4. Fuzzy-matches the target phrase against the current game's player
-   roster (typo-tolerant, alias-aware - same approach the vote counter
-   used for player names).
-5. Anything it cannot confidently resolve is written with
-   `needs_review = true` rather than dropped, so it surfaces on the
-   dashboard for you to fix by hand.
+`src/parser.js`:
 
-Because the private channels double as casual chat, the scraper only
-**records** a message that (a) contains a bold span and (b) looks like an
-action - it resolves to a known role/ability, matches a player, or has a
-`Role: Target` separator. Non-bolded chatter and stray emphasis
-(`I **really** don't know`) are skipped entirely. The trade-off: an
-action a player forgets to bold is missed. That is the right call once
-chatty channels are in scope - otherwise the dashboard fills with noise -
-and it matches the game convention that actions are bolded. This
-threshold lives in `isRecordableAction` in `src/parser.js` and is easy to
-loosen once you have seen real logs.
+1. Extracts every `**bolded**` span (falls back to the full message text,
+   flagged, if nothing is bolded).
+2. Splits on a separator if present; otherwise matches a leading word against
+   the ability aliases and treats the rest as the target.
+3. Resolves the ability against the **per-game ability catalog** loaded from
+   Supabase (each ability has names/aliases, an effect, a computable type, and
+   an optional splash) - not a hardcoded list.
+4. Fuzzy-matches the target against the roster - each player's `display_name`,
+   `channel_name`, and `aliases`, so "joe" resolves to the player whose channel
+   is "axatar".
+5. Anything it cannot confidently resolve is written with `needs_review = true`
+   rather than dropped, so it surfaces on the dashboard for the host to fix.
 
-**`src/roleAliases.js` is a first draft, written without seeing real
-game messages.** Mafia rulesets vary a lot between games - edit that
-file (or move it to a Supabase table if per-game customization turns
-out to matter) once you have watched a real night phase and seen which
-role/ability names actually show up.
+Because the private channels double as casual chat, the scraper only **records**
+a message that (a) has a bold span and (b) looks like an action - it resolves an
+ability, matches a player, or has a separator. Non-bolded chatter and stray
+emphasis (`I **really** don't know`) are skipped. The trade-off: an action a
+player forgets to bold is missed - the right call once chatty channels are in
+scope. This lives in `isRecordableAction` in `src/parser.js`.
+
+The ability catalog and player aliases are **defined per game in the app**, so
+parsing is data-driven and themed games work without code changes.
 
 ## Setup
 

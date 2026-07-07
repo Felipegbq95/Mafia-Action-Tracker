@@ -1,120 +1,120 @@
 import 'dotenv/config';
-import {
-  listTextChannels,
-  fetchMessagesAfter,
-  fetchRecentSince,
-} from './discord.js';
+import { fileURLToPath } from 'node:url';
+import { listTextChannels, fetchMessagesAfter, fetchRecentSince } from './discord.js';
 import { parseMessage, isRecordableAction } from './parser.js';
 import {
-  createSupabase,
-  getActiveGame,
-  getRoster,
-  getLatestMessageId,
-  insertSubmission,
+  createSupabase, getActiveGame, getPlayers, getAbilities,
+  getLatestMessageId, insertAction,
 } from './supabase.js';
 
-const GUILD_ID = process.env.DISCORD_GUILD_ID;
-if (!GUILD_ID) {
-  throw new Error('DISCORD_GUILD_ID must be set');
+function excludedChannels() {
+  return (process.env.DISCORD_EXCLUDE_CHANNELS ?? 'general,dead-chat,dead,graveyard,spectators')
+    .split(',').map((n) => n.trim().toLowerCase()).filter(Boolean);
 }
 
-// Channels that hold chatter, not night actions. Matched case-insensitively
-// by name. Override via DISCORD_EXCLUDE_CHANNELS (comma-separated names).
-const EXCLUDED_CHANNELS = (
-  process.env.DISCORD_EXCLUDE_CHANNELS ?? 'general,dead-chat,dead,graveyard,spectators'
-)
-  .split(',')
-  .map((name) => name.trim().toLowerCase())
-  .filter(Boolean);
+// One action per Discord message (the unique key is game + message id): take
+// the first bolded, action-shaped span. Extra actions in one message are the
+// host's to add by hand.
+export function firstAction(content, players, abilities) {
+  for (const candidate of parseMessage(content, players, abilities)) {
+    if (isRecordableAction(candidate)) return candidate;
+  }
+  return null;
+}
 
-async function scrapeChannel(supabase, channel, { game, roster, discordIdToPlayerId }) {
-  const cursor = await getLatestMessageId(supabase, channel.id);
+/**
+ * Pure mapping from fetched Discord messages to `actions` rows for one channel.
+ * `actor` is the channel's owning player (null for shared channels). Exposed for
+ * testing the attribution logic without Discord/Supabase.
+ */
+export function buildActionRows(messages, { game, channel, actor, players, abilities }) {
+  const rows = [];
+  for (const message of messages) {
+    if (message.author?.bot) continue;
+    const action = firstAction(message.content, players, abilities);
+    if (!action) continue;
+    rows.push({
+      game_id: game.id,
+      night_number: game.current_night_number,
+      actor_player_id: actor?.id ?? null,
+      ability_id: action.ability.id,
+      target_player_id: action.target.player?.id ?? null,
+      result: null,
+      source: 'scraped',
+      source_channel: channel.name,
+      discord_message_id: message.id,
+      raw_text: message.content,
+      actor_raw: message.author?.global_name ?? message.author?.username ?? null,
+      ability_raw: action.ability.raw,
+      target_raw: action.target.raw,
+      // A shared channel (no personal-channel owner) needs the host to assign
+      // the actor, so it always needs review.
+      needs_review: !actor || action.needsReview,
+    });
+  }
+  return rows;
+}
+
+async function scrapeChannel(supabase, channel, ctx) {
+  const { game, players, abilities, personalChannel } = ctx;
+  const actor = personalChannel.get(channel.name.toLowerCase()) ?? null;
+
+  const cursor = await getLatestMessageId(supabase, game.id, channel.name);
   const messages = cursor
     ? await fetchMessagesAfter(channel.id, cursor)
     : await fetchRecentSince(channel.id, new Date(game.created_at));
 
+  const rows = buildActionRows(messages, { game, channel, actor, players, abilities });
   let inserted = 0;
-  let flagged = 0;
-
-  for (const message of messages) {
-    if (message.author?.bot) continue;
-
-    const actions = parseMessage(message.content, roster);
-    for (const action of actions) {
-      if (!isRecordableAction(action)) continue;
-
-      const wrote = await insertSubmission(supabase, {
-        game_id: game.id,
-        night_number: game.current_night_number,
-        discord_message_id: message.id,
-        discord_channel_id: channel.id,
-        channel_name: channel.name,
-        submitted_at: message.timestamp,
-        submitter_player_id: discordIdToPlayerId.get(message.author.id) ?? null,
-        submitter_discord_id: message.author.id,
-        raw_message: message.content,
-        role_raw: action.role.raw,
-        role_canonical: action.role.canonical,
-        target_raw: action.target.raw,
-        target_player_id: action.target.player?.id ?? null,
-        target_match_score: action.target.score,
-        needs_review: action.needsReview,
-      });
-      if (wrote) {
-        inserted += 1;
-        if (action.needsReview) flagged += 1;
-      }
-    }
+  for (const row of rows) {
+    if (await insertAction(supabase, row)) inserted += 1;
   }
-
-  return { messages: messages.length, inserted, flagged };
+  return { channel: channel.name, shared: !actor, messages: messages.length, inserted };
 }
 
 async function main() {
+  const GUILD_ID = process.env.DISCORD_GUILD_ID;
+  if (!GUILD_ID) throw new Error('DISCORD_GUILD_ID must be set');
+  const EXCLUDED_CHANNELS = excludedChannels();
   const supabase = createSupabase();
 
   const game = await getActiveGame(supabase);
   if (!game) {
-    console.error('No active game found (games.is_active). Nothing to scrape.');
+    console.error('No active game found (games.status = active). Nothing to scrape.');
     process.exit(1);
   }
 
-  const roster = await getRoster(supabase, game.id);
-  const discordIdToPlayerId = new Map(
-    roster.filter((p) => p.discordId).map((p) => [p.discordId, p.id]),
+  const [players, abilities] = await Promise.all([
+    getPlayers(supabase, game.id),
+    getAbilities(supabase, game.id),
+  ]);
+  const personalChannel = new Map(
+    players.filter((p) => p.channel_name).map((p) => [p.channel_name.toLowerCase(), p]),
   );
 
-  const allChannels = await listTextChannels(GUILD_ID);
-  const channels = allChannels.filter(
-    (c) => !EXCLUDED_CHANNELS.includes(c.name.toLowerCase()),
-  );
+  const channels = (await listTextChannels(GUILD_ID))
+    .filter((c) => !EXCLUDED_CHANNELS.includes(c.name.toLowerCase()));
 
-  const totals = { messages: 0, inserted: 0, flagged: 0 };
+  const ctx = { game, players, abilities, personalChannel };
+  let totalMsgs = 0;
+  let totalInserted = 0;
   for (const channel of channels) {
     try {
-      const result = await scrapeChannel(supabase, channel, {
-        game,
-        roster,
-        discordIdToPlayerId,
-      });
-      totals.messages += result.messages;
-      totals.inserted += result.inserted;
-      totals.flagged += result.flagged;
+      const r = await scrapeChannel(supabase, channel, ctx);
+      totalMsgs += r.messages;
+      totalInserted += r.inserted;
     } catch (err) {
-      // A channel the bot cannot read (missing permission) or a transient
-      // error should not abort the whole run - skip it and keep going.
       console.warn(`Skipped #${channel.name} (${channel.id}): ${err.message}`);
     }
   }
 
   console.log(
-    `Scanned ${channels.length} channel(s), ${totals.messages} message(s); ` +
-      `inserted ${totals.inserted} submission(s)` +
-      `${totals.flagged ? `, ${totals.flagged} flagged for review` : ''}.`,
+    `Game "${game.name}" night ${game.current_night_number}: scanned ${channels.length} ` +
+      `channel(s), ${totalMsgs} message(s), inserted ${totalInserted} action(s).`,
   );
 }
 
-main().catch((err) => {
-  console.error('Scrape failed:', err);
-  process.exit(1);
-});
+// Only run when invoked directly (not when imported by tests).
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((err) => { console.error('Scrape failed:', err); process.exit(1); });
+}

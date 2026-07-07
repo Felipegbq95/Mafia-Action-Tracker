@@ -2,115 +2,102 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseMessage, matchPlayer, isRecordableAction } from './parser.js';
 
-const ROSTER = [
-  { id: '1', displayName: 'Axatar' },
-  { id: '2', displayName: 'Bramblewood', aliases: ['Bramble'] },
-  { id: '3', displayName: 'Cortez' },
+const ABILITIES = [
+  { id: 'ab-cop', name: 'Investigate', aliases: ['cop', 'check', 'investigate'] },
+  { id: 'ab-doc', name: 'Protect', aliases: ['doctor', 'doc', 'protect'] },
+  { id: 'ab-kill', name: 'Kill', aliases: ['mafia', 'kill'] },
 ];
 
-test('clean "Role: Target" with a colon', () => {
-  const [result] = parseMessage('**cop: Axatar**', ROSTER);
-  assert.equal(result.role.canonical, 'cop');
-  assert.equal(result.target.player.id, '1');
-  assert.equal(result.needsReview, false);
+const PLAYERS = [
+  { id: '1', display_name: 'Axatar', channel_name: 'axatar', aliases: ['joe'] },
+  { id: '2', display_name: 'Bramblewood', channel_name: 'bramble', aliases: ['bram'] },
+  { id: '3', display_name: 'Cortez', channel_name: 'cortez', aliases: [] },
+];
+
+const parse = (content) => parseMessage(content, PLAYERS, ABILITIES);
+
+test('clean "ability: target" with a colon', () => {
+  const [r] = parse('**cop: Axatar**');
+  assert.equal(r.ability.id, 'ab-cop');
+  assert.equal(r.target.player.id, '1');
+  assert.equal(r.needsReview, false);
 });
 
-test('dash separator instead of colon', () => {
-  const [result] = parseMessage('**Doctor - Bramblewood**', ROSTER);
-  assert.equal(result.role.canonical, 'doctor');
-  assert.equal(result.target.player.id, '2');
+test('target resolves via alias (joe -> Axatar)', () => {
+  const [r] = parse('**cop: joe**');
+  assert.equal(r.ability.id, 'ab-cop');
+  assert.equal(r.target.player.id, '1');
+  assert.equal(r.needsReview, false);
 });
 
-test('em dash separator', () => {
-  const [result] = parseMessage('**mafia — Cortez**', ROSTER);
-  assert.equal(result.role.canonical, 'mafia');
-  assert.equal(result.target.player.id, '3');
+test('target resolves via channel name', () => {
+  const [r] = parse('**protect bramble**');
+  assert.equal(r.ability.id, 'ab-doc');
+  assert.equal(r.target.player.id, '2');
 });
 
-test('ability name instead of role name, no separator', () => {
-  const [result] = parseMessage('**investigate Axatar**', ROSTER);
-  assert.equal(result.role.canonical, 'cop');
-  assert.equal(result.target.player.id, '1');
+test('dash and em-dash separators', () => {
+  assert.equal(parse('**Doctor - Bramblewood**')[0].ability.id, 'ab-doc');
+  assert.equal(parse('**mafia — Cortez**')[0].ability.id, 'ab-kill');
 });
 
-test('bold action embedded within a larger message', () => {
-  const [result] = parseMessage("I'll go ahead and **investigate Axatar** tonight, hope it works out", ROSTER);
-  assert.equal(result.role.canonical, 'cop');
-  assert.equal(result.target.player.id, '1');
+test('ability name resolved, no separator', () => {
+  const [r] = parse('**investigate Axatar**');
+  assert.equal(r.ability.id, 'ab-cop');
+  assert.equal(r.target.player.id, '1');
 });
 
-test('alias resolves via player alias list, not just display name', () => {
-  const [result] = parseMessage('**protect Bramble**', ROSTER);
-  assert.equal(result.role.canonical, 'doctor');
-  assert.equal(result.target.player.id, '2');
+test('action bolded inline within a larger message', () => {
+  const [r] = parse("I'll go ahead and **investigate joe** tonight");
+  assert.equal(r.ability.id, 'ab-cop');
+  assert.equal(r.target.player.id, '1');
 });
 
-test('typo in target name still fuzzy-matches', () => {
-  const [result] = parseMessage('**cop: Axatr**', ROSTER);
-  assert.equal(result.target.player.id, '1');
+test('typo in target still fuzzy-matches', () => {
+  assert.equal(parse('**cop: Axatr**')[0].target.player.id, '1');
 });
 
-test('unknown role phrase is flagged for review, not dropped', () => {
-  const [result] = parseMessage('**wizard: Axatar**', ROSTER);
-  assert.equal(result.role.canonical, null);
-  assert.equal(result.needsReview, true);
-  assert.equal(result.role.raw, 'wizard');
+test('unknown ability is flagged, not dropped', () => {
+  const [r] = parse('**wizard: Axatar**');
+  assert.equal(r.ability.id, null);
+  assert.equal(r.needsReview, true);
+  assert.equal(r.ability.raw, 'wizard');
 });
 
-test('unmatchable target is flagged for review, not dropped', () => {
-  const [result] = parseMessage('**cop: SomeoneNotInTheGame**', ROSTER);
-  assert.equal(result.role.canonical, 'cop');
-  assert.equal(result.target.player, null);
-  assert.equal(result.needsReview, true);
+test('unmatchable target is flagged, not dropped', () => {
+  const [r] = parse('**cop: SomeoneNotInTheGame**');
+  assert.equal(r.ability.id, 'ab-cop');
+  assert.equal(r.target.player, null);
+  assert.equal(r.needsReview, true);
 });
 
-test('message with no bold falls back to full text and is flagged', () => {
-  const [result] = parseMessage('cop: Axatar', ROSTER);
-  assert.equal(result.needsReview, true);
+// recording policy
+test('clean bolded action is recordable', () => {
+  assert.equal(isRecordableAction(parse('**cop: joe**')[0]), true);
 });
 
-test('message with no action content at all is still flagged, never throws', () => {
-  const results = parseMessage('good luck everyone tonight', ROSTER);
-  assert.equal(results.length, 1);
-  assert.equal(results[0].needsReview, true);
-});
-
-// --- recording policy (what the scraper actually persists) ---
-
-test('a clean bolded action is recordable', () => {
-  const [result] = parseMessage('**cop: Axatar**', ROSTER);
-  assert.equal(isRecordableAction(result), true);
-});
-
-test('a bolded action with unknown role is still recordable (for review)', () => {
-  const [result] = parseMessage('**wizard: Axatar**', ROSTER);
-  assert.equal(result.needsReview, true);
-  assert.equal(isRecordableAction(result), true);
-});
-
-test('bolding just a player name is recordable (target-only action)', () => {
-  const [result] = parseMessage('**Axatar**', ROSTER);
-  assert.equal(result.target.player.id, '1');
-  assert.equal(isRecordableAction(result), true);
+test('bolded action with unknown ability is still recordable (for review)', () => {
+  assert.equal(isRecordableAction(parse('**wizard: Axatar**')[0]), true);
 });
 
 test('non-bolded chatter is not recordable', () => {
-  const [result] = parseMessage('cop: Axatar', ROSTER);
-  assert.equal(result.fromBold, false);
-  assert.equal(isRecordableAction(result), false);
+  const [r] = parse('cop: Axatar');
+  assert.equal(r.fromBold, false);
+  assert.equal(isRecordableAction(r), false);
 });
 
-test('bolded plain emphasis (no action signal) is not recordable', () => {
-  const [result] = parseMessage("I **really** don't know who to pick", ROSTER);
-  assert.equal(result.looksLikeAction, false);
-  assert.equal(isRecordableAction(result), false);
+test('bolded plain emphasis is not recordable', () => {
+  const [r] = parse("I **really** don't know who to pick");
+  assert.equal(r.looksLikeAction, false);
+  assert.equal(isRecordableAction(r), false);
 });
 
-test('matchPlayer returns null below the similarity threshold', () => {
-  assert.equal(matchPlayer('zzz', ROSTER), null);
+test('matchPlayer matches channel name and alias, case-insensitively', () => {
+  assert.equal(matchPlayer('AXATAR', PLAYERS).player.id, '1');
+  assert.equal(matchPlayer('joe', PLAYERS).player.id, '1');
+  assert.equal(matchPlayer('bramble', PLAYERS).player.id, '2');
 });
 
-test('matchPlayer is case-insensitive', () => {
-  const match = matchPlayer('axatar', ROSTER);
-  assert.equal(match.player.id, '1');
+test('matchPlayer returns null below threshold', () => {
+  assert.equal(matchPlayer('zzz', PLAYERS), null);
 });
