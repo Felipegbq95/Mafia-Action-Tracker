@@ -147,14 +147,11 @@ parsing is data-driven and themed games work without code changes.
    right-click the server icon -> Copy Server ID. That is
    `DISCORD_GUILD_ID`.
 3. **Supabase**: create a free-tier project and run `db/schema.sql` in the
-   SQL editor (safe to re-run - it is idempotent). Then, once:
-   - Set the shared host password:
-     `select set_host_password('a-strong-host-password');`
-   - Load your regular players by editing and running `db/seed.sql`.
-   - Create a game (this also sets its dashboard PIN and links players):
-     `select admin_create_game('host-password', 'Game name', 'game-pin', array[]::uuid[]);`
-     Pass player ids in the array to add them, or use the admin UI later.
-     (Get ids from `select id, display_name from players;`.)
+   SQL editor. That is all the DB setup - there is no host password.
+   **Games, players, abilities, and aliases are all created in the app**
+   (open the dashboard, "Create game", then use the Players/Abilities
+   tabs). `db/seed.sql` is optional and only used to make a throwaway test
+   game from SQL. See `GO-LIVE.md` for the click-by-click version.
 4. Copy `.env.example` to `.env` and fill in `DISCORD_TOKEN`,
    `DISCORD_GUILD_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. The
    optional `DISCORD_EXCLUDE_CHANNELS` (comma-separated channel names)

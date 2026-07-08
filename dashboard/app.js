@@ -278,10 +278,39 @@ function renderLegend() {
   return box;
 }
 
+function effectLabel(a) {
+  return a.effect_text || a.ability_name || (a.ability_raw ? `${a.ability_raw} (unresolved)` : '?');
+}
+
+function renderPlayerDetails(pid) {
+  const box = h('div', {});
+  box.appendChild(h('h3', {}, playerName(pid) ?? 'Player'));
+  const did = nightActions().filter((a) => a.actor_player_id === pid);
+  const hit = nightActions().filter((a) => a.target_player_id === pid);
+
+  const block = (title, list, outgoing) => {
+    const b = h('div', { class: 'detail-block' }, h('h4', {}, title));
+    if (!list.length) { b.appendChild(h('p', { class: 'muted' }, '-')); return b; }
+    for (const a of list) {
+      const other = outgoing ? (a.target_name ?? a.target_raw ?? '?') : (a.actor_name ?? a.actor_raw ?? 'unassigned');
+      b.appendChild(h('div', { class: 'detail-row' },
+        h('span', { class: 'dot', style: `background:${CT_COLOR[a.computable_type] ?? CT_COLOR.none}` }),
+        h('span', {}, h('b', {}, effectLabel(a)), ` ${outgoing ? '->' : 'from'} `, h('b', {}, other),
+          a.result ? h('span', { class: 'result-tag' }, ` = ${a.result}`) : null)));
+      if (a.splash_text && !outgoing) b.appendChild(h('div', { class: 'detail-raw' }, `splash: ${a.splash_text}`));
+    }
+    return b;
+  };
+  box.appendChild(block('Did', did, true));
+  box.appendChild(block('Targeted by', hit, false));
+  return box;
+}
+
 function renderSide() {
   const side = h('aside', { class: 'details' });
   const selected = actions().find((a) => a.id === state.selectedActionId);
   if (selected && !state.readOnly) { side.appendChild(actionEditor(selected, true)); return side; }
+  if (state.hoverPlayerId) { side.appendChild(renderPlayerDetails(state.hoverPlayerId)); return side; }
 
   // unassigned (shared-channel) actions this night
   const unassigned = nightActions().filter((a) => !a.actor_player_id);

@@ -86,6 +86,11 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   padding: 8px 10px; margin-bottom: 8px; }
 .splash-head { font-size: 0.82rem; margin-bottom: 4px; }
 .splash-body { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 6px; }
+.detail-block h4 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-dim); margin: 14px 0 6px; }
+.detail-row { display: flex; gap: 8px; align-items: baseline; font-size: 0.86rem; margin-top: 6px; }
+.detail-row .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.result-tag { color: var(--warn); font-weight: 600; }
 
 /* editors */
 .stack { display: flex; flex-direction: column; gap: 12px; }
