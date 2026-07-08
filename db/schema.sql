@@ -1,9 +1,12 @@
 -- Mafia Night Action Tracker - schema + access layer.
 --
--- Safe to run top-to-bottom on a fresh Supabase project. Re-running is mostly
--- safe but this is a full redefinition of the model (see docs/DESIGN.md); if
--- you previously ran an older version, the old tables/functions from that
--- version may linger - drop them by hand if needed.
+-- Run top-to-bottom on a fresh Supabase project.
+--
+-- If you previously ran an OLDER version of this schema in the same project,
+-- the old tables have the wrong shape and re-running fails with errors like
+-- "column status does not exist". Fix: run db/reset.sql first (it drops the
+-- old objects), then run this file. reset.sql is destructive - only use it on
+-- a project with no data you want to keep.
 --
 -- Access model (see docs/DESIGN.md):
 --   * Anyone can create a game (create_game) and list games (list_games).

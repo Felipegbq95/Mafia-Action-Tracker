@@ -10,6 +10,11 @@ Everything below is click-level. There are three pieces to set up once
 2. Left sidebar -> **SQL Editor** -> **New query**. Open `db/schema.sql` from
    this repo, copy the whole file, paste it in, click **Run**. You should see
    "Success". (That is the entire database setup - there is no host password.)
+   - **If you get an error like "column status does not exist"**, this project
+     already has an older version of the schema. Run `db/reset.sql` first (a
+     New query, paste, Run - it clears the old tables), then run `schema.sql`
+     again. reset.sql deletes any existing games, so only use it on a test
+     project.
 3. Left sidebar -> **Project Settings** -> **API**. Copy three values:
    - **Project URL**
    - **anon public** key (safe to expose)
