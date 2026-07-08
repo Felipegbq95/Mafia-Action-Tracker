@@ -2,9 +2,9 @@ name: Deploy dashboard to GitHub Pages
 
 on:
   push:
-    branches: [main]
-    paths:
-      - 'dashboard/**'
+    # This repo's default branch is the claude/ branch (there is no main yet).
+    # Deploy from whichever exists so Pages updates on every push.
+    branches: [main, claude/mafia-action-tracker-n9iu41]
   workflow_dispatch: {}
 
 permissions:
