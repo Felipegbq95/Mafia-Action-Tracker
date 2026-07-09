@@ -5,6 +5,9 @@
   "private": true,
   "type": "module",
   "main": "src/scrape.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "scrape": "node src/scrape.js",
     "test": "node --test"
