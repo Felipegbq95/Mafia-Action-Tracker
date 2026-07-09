@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildActionRows } from './scrape.js';
+import { buildActionRows, channelActor } from './scrape.js';
 
 const GAME = { id: 'g1', current_night_number: 2 };
 const ABILITIES = [
@@ -12,6 +12,18 @@ const PLAYERS = [
   { id: 'p2', display_name: 'Bramble', channel_name: 'bramble', aliases: [] },
 ];
 const msg = (id, author, content) => ({ id, author: { username: author }, content });
+
+test('channelActor matches a channel by alias, name, or channel_name', () => {
+  const roster = [
+    { id: 'p1', display_name: 'Joe', channel_name: null, aliases: ['joe-smith', 'axatar'] },
+    { id: 'p2', display_name: 'Peyton', channel_name: 'peyton-room', aliases: [] },
+  ];
+  assert.equal(channelActor('axatar', roster)?.id, 'p1'); // by alias
+  assert.equal(channelActor('Joe-Smith', roster)?.id, 'p1'); // alias, normalized
+  assert.equal(channelActor('joe', roster)?.id, 'p1'); // by display name
+  assert.equal(channelActor('peyton-room', roster)?.id, 'p2'); // by channel_name
+  assert.equal(channelActor('besties-duo', roster), null); // group channel -> nobody
+});
 
 test('personal channel attributes the actor from the channel owner', () => {
   const [row] = buildActionRows(

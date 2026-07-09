@@ -40,10 +40,14 @@ night start/end. Deferred - noted so it isn't lost.
 - Tables stay locked (RLS on, no direct anon access); all access is through
   PIN-gated database functions. Scraper writes with the service role.
 
-## Everything is per-game
+## Everything is per-game (with a planned global player pool)
 
-Games are themed, so **abilities, players, channels, and aliases are all rebuilt
-each game.** (Optional convenience later: "import players from a previous game".)
+Abilities, channels, and aliases are themed and rebuilt each game. **Players are
+currently per-game too**, but the target model is a **game-agnostic pool of
+people** (~30 regulars + aliases): each game you pick the subset who are playing
+and add any newcomers, instead of re-entering everyone. This is a planned schema
+change (a persistent people table + per-game participation). Until then, the
+Players tab has a **paste-a-list** box so bulk entry is quick.
 
 ## Data model
 
@@ -79,8 +83,10 @@ each game.** (Optional convenience later: "import players from a previous game".
 Each player has a personal channel named after them; that is the source of truth
 for who acted.
 
-- Message in a channel whose name matches a player's `channel_name` -> actor =
-  that player.
+- Message in a channel whose name matches a player's `channel_name`,
+  `display_name`, or any alias (normalized) -> actor = that player. So a
+  channel named after a player's alias attributes automatically; you usually
+  do not need to set `channel_name` at all.
 - Message in any **other** included channel (mafia, lovers/duos, ...) -> it's a
   **shared channel**: the action is captured but `actor_player_id` is left null
   and flagged for the host to assign. Example: the mafia channel has 5 actions;

@@ -394,8 +394,35 @@ function renderActionsEditor() {
 }
 
 // ---- players tab ----------------------------------------------------------
+async function addPlayersBulk(text) {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  try {
+    for (const line of lines) {
+      const parts = line.split(',').map((s) => s.trim()).filter(Boolean);
+      const name = parts[0];
+      if (!name) continue;
+      await rpc('upsert_player', {
+        p_game_id: state.gameId, p_pin: state.pin, p_player_id: null,
+        p_display_name: name, p_channel_name: null, p_aliases: parts.slice(1),
+      });
+    }
+    await refresh(); state.error = '';
+  } catch (e) { state.error = e.message || String(e); }
+  render();
+}
+
 function renderPlayersEditor() {
   const wrap = h('div', { class: 'stack' });
+
+  const ta = h('textarea', { rows: '5',
+    placeholder: 'Paste one player per line:\nJoe, joe-smith, axatar\nPeyton, pey\n(first item is the name, the rest are aliases)' });
+  const paste = h('details', { class: 'paste-box' },
+    h('summary', {}, 'Paste a list of players'),
+    ta,
+    h('button', { class: 'primary', onclick: () => { const t = ta.value; ta.value = ''; addPlayersBulk(t); } }, 'Add these'),
+    h('p', { class: 'muted small' }, 'Channels auto-match a player\'s name or aliases, so you usually don\'t need to set a channel. Unmatched channels (mafia, duos) become group channels you assign by hand.'));
+  wrap.appendChild(paste);
+
   wrap.appendChild(h('button', { class: 'primary', onclick: () => mutate(() => rpc('upsert_player', {
     p_game_id: state.gameId, p_pin: state.pin, p_player_id: null,
     p_display_name: 'New player', p_channel_name: null, p_aliases: [],

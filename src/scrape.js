@@ -12,6 +12,26 @@ function excludedChannels() {
     .split(',').map((n) => n.trim().toLowerCase()).filter(Boolean);
 }
 
+const channelNorm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * Finds the player a channel belongs to. A channel is a player's personal
+ * channel if its name matches that player's channel_name, display_name, or any
+ * alias (normalized, so "joe-smith" matches "Joe Smith"). Channels that match
+ * nobody are group channels (mafia, duos) - this returns null for them and the
+ * scraper leaves those actions' actor for the host to assign.
+ */
+export function channelActor(channelName, players) {
+  const cn = channelNorm(channelName);
+  if (!cn) return null;
+  for (const p of players) {
+    for (const key of [p.channel_name, p.display_name, ...(p.aliases ?? [])]) {
+      if (key && channelNorm(key) === cn) return p;
+    }
+  }
+  return null;
+}
+
 // One action per Discord message (the unique key is game + message id): take
 // the first bolded, action-shaped span. Extra actions in one message are the
 // host's to add by hand.
@@ -56,8 +76,8 @@ export function buildActionRows(messages, { game, channel, actor, players, abili
 }
 
 async function scrapeChannel(supabase, channel, ctx) {
-  const { game, players, abilities, personalChannel } = ctx;
-  const actor = personalChannel.get(channel.name.toLowerCase()) ?? null;
+  const { game, players, abilities } = ctx;
+  const actor = channelActor(channel.name, players);
 
   const cursor = await getLatestMessageId(supabase, game.id, channel.name);
   const messages = cursor
@@ -88,14 +108,11 @@ async function main() {
     getPlayers(supabase, game.id),
     getAbilities(supabase, game.id),
   ]);
-  const personalChannel = new Map(
-    players.filter((p) => p.channel_name).map((p) => [p.channel_name.toLowerCase(), p]),
-  );
 
   const channels = (await listTextChannels(GUILD_ID))
     .filter((c) => !EXCLUDED_CHANNELS.includes(c.name.toLowerCase()));
 
-  const ctx = { game, players, abilities, personalChannel };
+  const ctx = { game, players, abilities };
   let totalMsgs = 0;
   let totalInserted = 0;
   for (const channel of channels) {
