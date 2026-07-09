@@ -58,6 +58,8 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .night-tab { padding: 6px 12px; font-size: 0.82rem; color: var(--text-dim); background: var(--panel); }
 .night-tab.active { background: var(--accent); color: #fff; border-color: transparent; }
 .night-tab.add { padding: 6px 10px; }
+.scrape-status { margin: -4px 0 12px; font-size: 0.85rem; color: var(--text-dim); }
+.scrape-status.needs-review { color: var(--accent); }
 .tabs { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
 .tab { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
   color: var(--text-dim); padding: 8px 12px; }

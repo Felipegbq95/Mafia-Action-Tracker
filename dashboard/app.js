@@ -74,10 +74,12 @@ async function refresh() {
 }
 async function openGame(gameId, pin) {
   state.gameId = gameId; state.pin = pin; state.readOnly = false;
+  $('scrape-status').hidden = true;
   await refresh(); render();
 }
 async function openPublic(gameId) {
   state.gameId = gameId; state.pin = null; state.readOnly = true;
+  $('scrape-status').hidden = true;
   await refresh(); render();
 }
 // wrap a mutation: run, refresh, re-render; surface errors
@@ -153,6 +155,7 @@ function renderGame() {
   $('game-name').textContent = g.name;
   $('ro-badge').hidden = !state.readOnly;
   $('finish-btn').hidden = state.readOnly;
+  $('scrape-btn').hidden = state.readOnly;
 
   const nt = $('night-tabs'); nt.innerHTML = '';
   for (const n of nightNumbers()) {
@@ -485,12 +488,38 @@ function renderAbilitiesEditor() {
 $('create-btn').addEventListener('click', createGame);
 $('back-btn').addEventListener('click', () => {
   state.data = null; state.gameId = null; state.pin = null; state.selectedActionId = null; state.error = '';
+  $('scrape-status').hidden = true;
   loadGames().then(render).catch(showErr);
 });
 $('finish-btn').addEventListener('click', () => {
   if (!confirm('Finish this game? This removes the PIN and makes it public read-only.')) return;
   mutate(() => rpc('archive_game', { p_game_id: state.gameId, p_pin: state.pin })
     .then(() => { state.readOnly = true; }));
+});
+
+const scrapeStatusEl = $('scrape-status');
+$('scrape-btn').addEventListener('click', async () => {
+  const btn = $('scrape-btn');
+  btn.disabled = true;
+  scrapeStatusEl.hidden = false;
+  scrapeStatusEl.className = 'scrape-status';
+  scrapeStatusEl.textContent = 'Scraping...';
+  try {
+    const { data, error } = await supabase.functions.invoke('scrape', {
+      body: { game_id: state.gameId, pin: state.pin },
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    scrapeStatusEl.textContent =
+      `Scraped ${data.channels} channel(s), ${data.messages} message(s), inserted ${data.inserted} action(s).`;
+    await refresh();
+    render();
+  } catch (e) {
+    scrapeStatusEl.className = 'scrape-status needs-review';
+    scrapeStatusEl.textContent = `Scrape failed: ${e.message || e}`;
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 loadGames().then(render).catch(showErr);

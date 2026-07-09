@@ -43,15 +43,59 @@ players/abilities by hand - no Discord needed.
    game server) -> open the URL -> add it to the game's server.
 3. **Server ID:** in Discord, enable Developer Mode (Settings -> Advanced),
    right-click the server icon -> **Copy Server ID**.
-4. **Give the scraper its secrets:** GitHub repo **Settings** -> **Secrets and
-   variables** -> **Actions** -> add four repository secrets:
-   - `DISCORD_TOKEN` (the bot token)
-   - `DISCORD_GUILD_ID` (the server id)
-   - `SUPABASE_URL` (Project URL)
-   - `SUPABASE_SERVICE_ROLE_KEY` (the secret key)
-5. The scrape workflow (`.github/workflows/scrape.yml`) runs every ~5 minutes.
-   Turn it **off** in the Actions tab when no game is running; run it manually
-   there any time.
+
+There are two ways to actually run the scraper. **The "Scrape now" button in
+the dashboard (3a) is the one to use** - it runs on demand, not on a timer, and
+never puts secrets in the browser. 3b is an optional backup on a schedule.
+
+### 3a. "Scrape now" button (recommended) - one-time CLI deploy
+
+The button calls a small function that lives inside Supabase itself (a
+Supabase Edge Function), so the Discord token and the database's full-access
+key stay server-side - never visible in the page. Setting this up needs the
+Supabase CLI once, from a terminal on your machine:
+
+1. Install the CLI (pick one):
+   ```
+   npm install -g supabase
+   ```
+   or see [supabase.com/docs/guides/cli](https://supabase.com/docs/guides/cli)
+   for other options (brew, scoop, etc.).
+2. In a clone of this repo:
+   ```
+   supabase login
+   supabase link --project-ref oemqjnxhrppvftugdazs
+   ```
+   (`login` opens a browser to authorize the CLI; the project ref is the code
+   in your Supabase project URL, e.g. `oemqjnxhrppvftugdazs` in
+   `supabase.com/dashboard/project/oemqjnxhrppvftugdazs`.)
+3. Deploy the function:
+   ```
+   supabase functions deploy scrape
+   ```
+4. Give it the two secrets it needs (the database URL and key are provided to
+   every function automatically - you only set these two):
+   ```
+   supabase secrets set DISCORD_TOKEN=your-bot-token DISCORD_GUILD_ID=your-server-id
+   ```
+5. Done. Open a game in the dashboard and click **Scrape now** in the game bar.
+   It reports how many channels/messages it scanned and how many actions it
+   inserted, right in the page.
+
+If you ever rotate the Discord token, re-run step 4 with the new value - no
+redeploy needed.
+
+### 3b. Scheduled scraping (optional backup)
+
+`.github/workflows/scrape.yml` can also run the scraper every ~5 minutes via
+GitHub Actions, independent of the button. Only set this up if you want a
+backup that keeps scraping even when nobody has the dashboard open:
+
+1. GitHub repo **Settings** -> **Secrets and variables** -> **Actions** -> add
+   four repository secrets: `DISCORD_TOKEN`, `DISCORD_GUILD_ID`,
+   `SUPABASE_URL` (Project URL), `SUPABASE_SERVICE_ROLE_KEY`.
+2. The workflow is disabled by default - enable it from the **Actions** tab
+   when you want it running, and turn it back off between games.
 
 ## 4. Running a game
 

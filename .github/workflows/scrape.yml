@@ -1,15 +1,18 @@
 name: Scrape night actions
 
 on:
-  # Run on demand from the Actions tab any time.
+  # Manual/backup entrypoint - run from the Actions tab any time. The primary
+  # way to scrape is the "Scrape now" button in the dashboard (a Supabase
+  # Edge Function, see GO-LIVE.md 3a); this workflow is a fallback that
+  # doesn't need the dashboard open.
   workflow_dispatch: {}
-  # Best-effort polling. GitHub's scheduler has a ~5 minute floor and often
-  # runs late under load, so this is "near-live", not instant. When you are
-  # not running a game, disable this workflow from the Actions tab (one
-  # click, no commit) so it stops running every few minutes - and note that
-  # GitHub auto-disables scheduled workflows after 60 days of repo inactivity.
-  schedule:
-    - cron: '*/5 * * * *'
+  # No schedule trigger by default (a YAML-level `schedule:` here would run
+  # every few minutes with no way to turn it off short of removing it or
+  # disabling the whole workflow). Uncomment to poll on a timer instead of
+  # using the button - GitHub's scheduler has a ~5 minute floor and runs
+  # best-effort, so it's near-live, not instant:
+  # schedule:
+  #   - cron: '*/5 * * * *'
 
 jobs:
   scrape:

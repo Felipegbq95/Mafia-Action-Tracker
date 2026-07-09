@@ -140,6 +140,27 @@ Changes are saved to Supabase via PIN-gated functions.
 - Insert draft actions; shared-channel actions get a null actor for the host to
   assign.
 
+## Scraper trigger: Edge Function button, not a client-side call
+
+The dashboard only holds the public anon key, which cannot safely hold the
+Discord bot token or the Supabase service role key (both let you read every
+game/channel, defeating the PIN). So the "Scrape now" button does not call
+Discord or the database directly from the browser - it calls a **Supabase
+Edge Function** (`supabase/functions/scrape/`), which holds those two secrets
+server-side and re-verifies the caller's PIN before doing anything.
+
+The scraping/attribution logic (`channelActor`, `buildActionRows`,
+`scrapeGame`) lives in `src/scraper-core.js`, written with zero Node- or
+Deno-specific APIs so it works unchanged in both the Node cron script
+(`src/scrape.js`) and the Edge Function. It is **duplicated**, not imported
+across, into `supabase/functions/_shared/` (Node and Deno don't share a module
+graph, and Supabase's deploy bundling is per-function) - keep the two copies
+in sync when editing either.
+
+A scheduled cron (`.github/workflows/scrape.yml`) still exists as an optional
+backup, disabled by default (no `schedule:` trigger), since the button covers
+the normal case.
+
 ## Open decisions (defaults marked)
 
 1. Players per-game, rebuilt each game *(default)*, with an optional
@@ -151,11 +172,17 @@ Changes are saved to Supabase via PIN-gated functions.
 
 ## Build order
 
-- **A. Schema rework:** drop host-password/admin layer; PIN-gated full access;
-  add per-game abilities + players.channel_name + actions(result, actor
-  nullable, manual); open create-game.
-- **B. Scraper:** channel-based attribution + data-driven abilities/aliases.
-- **C. Dashboard editor:** create-game + abilities editor + players/aliases
-  editor + action add/edit/delete + assign results by clicking arrows.
-- **D. Effects + splashes** rendering.
-- **E. (later) auto-derive** track/watch/roleblock results.
+- **A. Schema rework** *(done)*: drop host-password/admin layer; PIN-gated
+  full access; add per-game abilities + players.channel_name + actions(result,
+  actor nullable, manual); open create-game.
+- **B. Scraper** *(done)*: channel-based attribution + data-driven
+  abilities/aliases (name/display_name/alias match, not just channel_name).
+- **C. Dashboard editor** *(done)*: create-game + abilities editor +
+  players/aliases editor (incl. paste-a-list) + action add/edit/delete +
+  assign results by clicking arrows.
+- **D. Effects + splashes rendering** *(done)*: board hover shows effect text
+  and splashes, not raw ability names.
+- **E. On-demand scrape button** *(done)*: Supabase Edge Function, see above.
+- **F. (later) auto-derive** track/watch/roleblock results.
+- **G. (later) game-agnostic player pool** - see "Everything is per-game"
+  above.

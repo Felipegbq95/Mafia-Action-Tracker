@@ -123,6 +123,11 @@ as $$
   );
 $$;
 revoke all on function verify_game_pin(uuid, text) from public;
+-- The scrape Edge Function runs as service_role and calls this directly to
+-- check the PIN before scraping. Function EXECUTE grants are separate from
+-- RLS bypass, so service_role needs this even though it can read tables
+-- directly.
+grant execute on function verify_game_pin(uuid, text) to service_role;
 
 -- Builds the full game payload as json (game meta + players + abilities +
 -- resolved actions). Used by both the gated and public read paths.

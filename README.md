@@ -71,25 +71,35 @@ functional skeleton to wire up and test against a real channel.
 
 ## Security model
 
-The browser talks to Supabase with the **public anon key**, so the anon
-key must not be able to read the tables - otherwise anyone could bypass a
-PIN prompt and pull the data straight from the API. So:
+The browser talks to Supabase with the **public anon key**, so the anon key
+must not be able to read the tables - otherwise anyone (e.g. a player who
+opens dev tools) could bypass the PIN and pull the data straight from the
+API. So:
 
-- Row Level Security is ON for every table with **no read policies**, which
-  denies the anon key all direct table access.
-- All browser access goes through `SECURITY DEFINER` database functions
-  (in `db/schema.sql`) that check a password/PIN *before* returning
-  anything. `dashboard_submissions(game_id, pin)` verifies the game PIN;
-  the `admin_*` functions verify a shared **host password**. Both are
-  stored only as bcrypt hashes (via `pgcrypto`).
-- The scraper uses the **service role key**, which bypasses RLS, so it
-  keeps writing normally.
+- Row Level Security is ON for every table with **no read/write policies**,
+  which denies the anon key all direct table access.
+- All browser access goes through `SECURITY DEFINER` database functions (in
+  `db/schema.sql`): `create_game`/`list_games` are open (game names aren't
+  secret), `public_game_data` serves only archived games, and everything else
+  (`game_data`, `upsert_*`, `delete_*`, `archive_game`, ...) verifies the
+  game's PIN *first* via `verify_game_pin`, which checks it against a bcrypt
+  hash (`pgcrypto`). One PIN per game grants full read+write access to that
+  game - there is no separate host password.
+- The scraper writes with the **service role key**, which bypasses RLS
+  entirely.
+- The **"Scrape now" button** calls a Supabase Edge Function
+  (`supabase/functions/scrape/`) instead of talking to Discord/writing to the
+  database directly from the browser. The Discord bot token and the service
+  role key live only in the function's server-side secrets - the browser
+  sends just the game's PIN, which the function re-verifies (via the same
+  `verify_game_pin`) before scraping. This is the reason the button needs a
+  one-time Edge Function deploy rather than being pure client-side JS: those
+  two secrets can never be safely embedded in a static page.
 
-This makes the game PIN a real server-side lock, not a client-side
-curtain. PINs are required to be 6+ characters and the host password 8+,
-because an open, server-checked endpoint can be brute-forced if the secret
-is tiny (bcrypt's slowness is the main brake; a short numeric PIN would
-still be weak).
+This makes the game PIN a real server-side lock, not a client-side curtain.
+PINs must be 6+ characters, because an open, server-checked endpoint can be
+brute-forced if the secret is tiny (bcrypt's slowness is the main brake, but
+a short numeric PIN would still be weak).
 
 ## Message parsing
 
@@ -165,19 +175,25 @@ parsing is data-driven and themed games work without code changes.
 
 ### Running the scraper
 
-- **Manually / locally**: `npm install && npm run scrape`. Run it
-  whenever you want to pull in new submissions (e.g. once at the end of
-  a night, or a few times during).
-- **On a schedule (no hosting)**: `.github/workflows/scrape.yml` runs
-  `npm run scrape` on a cron with zero servers to maintain. Add your
-  four env values as repository secrets (Settings -> Secrets and
-  variables -> Actions): `DISCORD_TOKEN`, `DISCORD_GUILD_ID`,
-  `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. GitHub's scheduler has a
-  ~5 minute floor
-  and runs best-effort (often a few minutes late), so it is near-live,
-  not instant. When you are not running a game, disable the workflow from
-  the Actions tab so it stops polling; you can still trigger it manually
-  there any time.
+There are three ways to run it, in order of how you'll actually use them:
+
+- **"Scrape now" button in the dashboard (primary)**: `supabase/functions/scrape/`
+  is a Supabase Edge Function - the button calls it with just the game's PIN;
+  the Discord token and the database's full-access key stay server-side,
+  never in the browser (see "Security model"). One-time CLI deploy, see
+  `GO-LIVE.md` 3a.
+- **Manually / locally**: `npm install && npm run scrape`. Useful for
+  developing/debugging the scraper itself against a real Discord server.
+- **On a schedule (optional backup)**: `.github/workflows/scrape.yml` can run
+  `npm run scrape` on a cron with zero servers to maintain, independent of the
+  button. It ships with the schedule trigger commented out (uncomment to use
+  it) - GitHub's scheduler has a ~5 minute floor and runs best-effort, so it's
+  near-live, not instant.
+
+All three run the same logic: `src/scraper-core.js` holds the runtime-agnostic
+scraping/attribution code, duplicated (not imported across, since Node and
+Deno don't share a module graph) into `supabase/functions/_shared/` for the
+Edge Function. Keep the two copies in sync when editing.
 
 ### Deploying the dashboard
 
