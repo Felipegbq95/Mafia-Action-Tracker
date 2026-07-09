@@ -43,6 +43,7 @@ async function main() {
     game,
     players,
     abilities,
+    mods: game.mod_accounts ?? [],
   });
 
   for (const c of result.perChannel) {

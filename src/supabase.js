@@ -13,7 +13,7 @@ export function createSupabase({ url, serviceRoleKey } = {}) {
 export async function getActiveGame(supabase) {
   const { data, error } = await supabase
     .from('games')
-    .select('id, name, current_night_number, created_at')
+    .select('id, name, current_night_number, created_at, mod_accounts')
     .eq('status', 'active')
     .order('created_at', { ascending: false })
     .limit(1)

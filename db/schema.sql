@@ -31,12 +31,17 @@ create table if not exists games (
   -- bcrypt hash of the game PIN. Null once archived (PIN removed -> public).
   pin_hash text,
   current_night_number int not null default 1,
+  -- Discord accounts (username, display name, or user id) to ignore entirely
+  -- when scraping - mods post bolded RESULTS into player channels, which would
+  -- otherwise be read as that player's action. Up to 5.
+  mod_accounts text[] not null default '{}',
   -- optional manually-set night window until vote-parser integration exists
   night_started_at timestamptz,
   night_ends_at timestamptz,
   created_at timestamptz not null default now(),
   archived_at timestamptz
 );
+alter table games add column if not exists mod_accounts text[] not null default '{}';
 
 create table if not exists players (
   id uuid primary key default gen_random_uuid(),
@@ -141,6 +146,7 @@ as $$
     'game', (select json_build_object(
         'id', g.id, 'name', g.name, 'status', g.status,
         'current_night_number', g.current_night_number,
+        'mod_accounts', g.mod_accounts,
         'night_started_at', g.night_started_at, 'night_ends_at', g.night_ends_at,
         'created_at', g.created_at, 'archived_at', g.archived_at)
       from games g where g.id = p_game_id),
@@ -395,6 +401,28 @@ begin
 end;
 $$;
 grant execute on function set_current_night(uuid, text, int) to anon, authenticated;
+
+-- Mod accounts the scraper ignores entirely (blanks/dupes stripped, capped at
+-- 5). Match a Discord username, display name, or user id.
+create or replace function set_mod_accounts(p_game_id uuid, p_pin text, p_accounts text[])
+returns void
+language plpgsql security definer set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_clean text[];
+begin
+  perform assert_game_pin(p_game_id, p_pin);
+  select array_agg(a) into v_clean
+  from (
+    select distinct trim(a) as a
+    from unnest(coalesce(p_accounts, '{}')) as a
+    where trim(a) <> ''
+    limit 5
+  ) s;
+  update games set mod_accounts = coalesce(v_clean, '{}') where id = p_game_id;
+end;
+$$;
+grant execute on function set_mod_accounts(uuid, text, text[]) to anon, authenticated;
 
 -- Finish a game: remove the PIN and lock editing; becomes public read-only.
 create or replace function archive_game(p_game_id uuid, p_pin text)

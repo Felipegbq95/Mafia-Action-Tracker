@@ -29,6 +29,22 @@ export function channelActor(channelName, players) {
   return null;
 }
 
+// Whether a message's author should be ignored entirely. Bots always are;
+// mods are matched by Discord username, display name, or user id (normalized),
+// because mods post bolded RESULTS into player channels that would otherwise be
+// read as that player's action.
+export function isIgnoredAuthor(author, mods = []) {
+  if (!author) return false;
+  if (author.bot) return true;
+  const candidates = [author.id, author.username, author.global_name]
+    .filter(Boolean).map((s) => String(s).trim().toLowerCase());
+  for (const mod of mods) {
+    const m = String(mod ?? '').trim().toLowerCase();
+    if (m && candidates.includes(m)) return true;
+  }
+  return false;
+}
+
 // One action per Discord message (the unique key is game + message id): take
 // the first bolded, action-shaped span. Extra actions in one message are the
 // host's to add by hand.
@@ -43,10 +59,10 @@ export function firstAction(content, players, abilities) {
  * Pure mapping from fetched Discord messages to `actions` rows for one channel.
  * `actor` is the channel's owning player (null for shared channels).
  */
-export function buildActionRows(messages, { game, channel, actor, players, abilities }) {
+export function buildActionRows(messages, { game, channel, actor, players, abilities, mods = [] }) {
   const rows = [];
   for (const message of messages) {
-    if (message.author?.bot) continue;
+    if (isIgnoredAuthor(message.author, mods)) continue;
     const action = firstAction(message.content, players, abilities);
     if (!action) continue;
     rows.push({
@@ -80,7 +96,7 @@ export function buildActionRows(messages, { game, channel, actor, players, abili
  * A channel that errors (e.g. the bot can't read it) is skipped, not fatal.
  * Returns { channels, messages, inserted, perChannel }.
  */
-export async function scrapeGame({ discord, db, guildId, excludedChannels, game, players, abilities }) {
+export async function scrapeGame({ discord, db, guildId, excludedChannels, game, players, abilities, mods = [] }) {
   const channels = (await discord.listTextChannels(guildId))
     .filter((c) => !excludedChannels.includes(c.name.toLowerCase()));
 
@@ -96,7 +112,7 @@ export async function scrapeGame({ discord, db, guildId, excludedChannels, game,
         ? await discord.fetchMessagesAfter(channel.id, cursor)
         : await discord.fetchRecentSince(channel.id, new Date(game.created_at));
 
-      const rows = buildActionRows(messages, { game, channel, actor, players, abilities });
+      const rows = buildActionRows(messages, { game, channel, actor, players, abilities, mods });
       let inserted = 0;
       for (const row of rows) {
         if (await db.insertAction(row)) inserted += 1;

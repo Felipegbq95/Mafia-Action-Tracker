@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
 
   const { data: game, error: gameErr } = await supabase
     .from('games')
-    .select('id, name, status, current_night_number, created_at')
+    .select('id, name, status, current_night_number, created_at, mod_accounts')
     .eq('id', gameId)
     .maybeSingle();
   if (gameErr) return json({ error: gameErr.message }, 500);
@@ -118,6 +118,7 @@ Deno.serve(async (req) => {
       game,
       players: players ?? [],
       abilities: abilities ?? [],
+      mods: game.mod_accounts ?? [],
     });
     return json({ ok: true, game: game.name, ...result });
   } catch (err) {

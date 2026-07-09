@@ -169,7 +169,8 @@ function renderGame() {
         .then(() => { state.night = Math.max(...nightNumbers()) + 1; })) }, '+'));
   }
 
-  const tabs = state.readOnly ? ['board'] : ['board', 'actions', 'players', 'abilities'];
+  const tabs = state.readOnly ? ['board'] : ['board', 'actions', 'players', 'abilities', 'settings'];
+  if (!tabs.includes(state.tab)) state.tab = 'board';
   const nav = $('tabs'); nav.innerHTML = '';
   for (const t of tabs) {
     nav.appendChild(h('button', { class: 'tab' + (state.tab === t ? ' active' : ''),
@@ -182,6 +183,38 @@ function renderGame() {
   else if (state.tab === 'actions') panel.appendChild(renderActionsEditor());
   else if (state.tab === 'players') panel.appendChild(renderPlayersEditor());
   else if (state.tab === 'abilities') panel.appendChild(renderAbilitiesEditor());
+  else if (state.tab === 'settings') panel.appendChild(renderSettings());
+}
+
+// ---- settings tab ---------------------------------------------------------
+function renderSettings() {
+  const wrap = h('div', { class: 'stack' });
+  const g = state.data.game;
+
+  const box = h('div', { class: 'editor' });
+  box.appendChild(h('h3', {}, 'Mod accounts to ignore'));
+  box.appendChild(h('p', { class: 'muted small' },
+    'Up to 5. Messages from these accounts are skipped entirely when scraping - '
+    + 'use this for mods who post bolded results into player channels. '
+    + 'One per line: a Discord username, display name, or user id.'));
+  const ta = h('textarea', { rows: '5', placeholder: 'ModMike\nAnotherMod' });
+  ta.value = (g.mod_accounts ?? []).join('\n');
+  box.appendChild(ta);
+  const status = h('span', { class: 'muted small' });
+  box.appendChild(h('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:10px' },
+    h('button', { class: 'primary', onclick: async () => {
+      const accounts = ta.value.split('\n').map((s) => s.trim()).filter(Boolean);
+      status.textContent = 'Saving...';
+      try {
+        await rpc('set_mod_accounts', { p_game_id: state.gameId, p_pin: state.pin, p_accounts: accounts });
+        await refresh();
+        state.error = '';
+        render();
+      } catch (e) { state.error = e.message || String(e); render(); }
+    } }, 'Save mods'),
+    status));
+  wrap.appendChild(box);
+  return wrap;
 }
 
 // ---- board (graph + side) -------------------------------------------------

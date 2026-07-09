@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildActionRows, channelActor } from './scrape.js';
+import { isIgnoredAuthor } from './scraper-core.js';
 
 const GAME = { id: 'g1', current_night_number: 2 };
 const ABILITIES = [
@@ -23,6 +24,36 @@ test('channelActor matches a channel by alias, name, or channel_name', () => {
   assert.equal(channelActor('joe', roster)?.id, 'p1'); // by display name
   assert.equal(channelActor('peyton-room', roster)?.id, 'p2'); // by channel_name
   assert.equal(channelActor('besties-duo', roster), null); // group channel -> nobody
+});
+
+test('isIgnoredAuthor matches mods by username, display name, or id; and bots', () => {
+  const mods = ['ModMike', '999888777'];
+  assert.equal(isIgnoredAuthor({ username: 'modmike' }, mods), true); // username, case-insensitive
+  assert.equal(isIgnoredAuthor({ global_name: 'ModMike' }, mods), true); // display name
+  assert.equal(isIgnoredAuthor({ id: '999888777', username: 'whoever' }, mods), true); // id
+  assert.equal(isIgnoredAuthor({ username: 'Axatar' }, mods), false); // a real player
+  assert.equal(isIgnoredAuthor({ username: 'x', bot: true }, mods), true); // bots always
+  assert.equal(isIgnoredAuthor({ username: 'x' }, []), false);
+});
+
+test('buildActionRows drops messages from mod accounts (bolded results)', () => {
+  const players = [
+    { id: 'p1', display_name: 'Axatar', channel_name: 'axatar', aliases: [] },
+    { id: 'p2', display_name: 'Bramble', channel_name: 'bramble', aliases: [] },
+  ];
+  const abilities = [{ id: 'ab', name: 'Investigate', aliases: ['cop'] }];
+  const rows = buildActionRows(
+    [
+      // mod posts a bolded RESULT into the cop's channel - must be ignored
+      { id: '1', author: { username: 'ModMike' }, content: '**cop result: Bramble is town**' },
+      // the actual player action
+      { id: '2', author: { username: 'axatar_user' }, content: '**cop: Bramble**' },
+    ],
+    { game: { id: 'g', current_night_number: 1 }, channel: { name: 'axatar' },
+      actor: players[0], players, abilities, mods: ['ModMike'] },
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].discord_message_id, '2');
 });
 
 test('personal channel attributes the actor from the channel owner', () => {
