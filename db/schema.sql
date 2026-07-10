@@ -85,6 +85,9 @@ create table if not exists actions (
   source text not null default 'scraped' check (source in ('scraped','manual')),
   source_channel text,
   discord_message_id text,
+  -- which bolded span within the message this action came from (a single
+  -- message can carry several actions, e.g. the mafia channel)
+  span_index int not null default 0,
   raw_text text,
   -- what the scraper saw before resolving, kept for review
   actor_raw text,
@@ -95,9 +98,14 @@ create table if not exists actions (
   created_at timestamptz not null default now()
 );
 
--- Dedup scraped messages (manual actions have a null message id, allowed many).
-create unique index if not exists actions_msg_uniq
-  on actions (game_id, discord_message_id) where discord_message_id is not null;
+alter table actions add column if not exists span_index int not null default 0;
+
+-- Dedup scraped spans (manual actions have a null message id, allowed many).
+-- Recreated to include span_index; the old (game_id, message_id) index from
+-- earlier versions is dropped first.
+drop index if exists actions_msg_uniq;
+create unique index actions_msg_uniq
+  on actions (game_id, discord_message_id, span_index) where discord_message_id is not null;
 create index if not exists actions_game_night_idx on actions (game_id, night_number);
 
 -- ---------------------------------------------------------------------------
@@ -166,6 +174,7 @@ as $$
         'splash_text', ab.splash_text,
         'target_player_id', act.target_player_id, 'target_name', tp.display_name,
         'result', act.result, 'source', act.source, 'source_channel', act.source_channel,
+        'span_index', act.span_index,
         'raw_text', act.raw_text, 'actor_raw', act.actor_raw,
         'ability_raw', act.ability_raw, 'target_raw', act.target_raw,
         'needs_review', act.needs_review, 'created_at', act.created_at)

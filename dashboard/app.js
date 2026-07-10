@@ -1,5 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
+import { parseMessage, isRecordableAction } from './parser.js';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -287,7 +288,7 @@ function drawGraph() {
     const pt = pts[i];
     const acted = actors.has(p.id);
     const dimmed = hover && !incident.has(p.id);
-    const g = svgEl('g', { style: 'cursor:pointer' });
+    const g = svgEl('g', { style: 'cursor:pointer', 'data-player': p.id });
     g.appendChild(svgEl('circle', { cx: pt.x, cy: pt.y, r: nodeR,
       fill: acted ? '#e8e9f3' : '#3a3e5c',
       stroke: state.hoverPlayerId === p.id ? '#e0454f' : 'rgba(255,255,255,0.15)',
@@ -299,9 +300,21 @@ function drawGraph() {
       'text-anchor': anchor, class: 'node-label', opacity: dimmed ? 0.3 : 1 });
     label.textContent = p.display_name;
     g.appendChild(label);
-    g.addEventListener('mouseenter', () => { state.hoverPlayerId = p.id; render(); });
-    g.addEventListener('mouseleave', () => { state.hoverPlayerId = null; render(); });
     svg.appendChild(g);
+  });
+
+  // Hover via pointer tracking on the svg itself, not per-node enter/leave
+  // listeners: the graph re-renders on hover change, and a node re-created
+  // under a stationary cursor never fires mouseleave, leaving the view stuck
+  // in the hovered state. pointermove re-derives hover from whatever is under
+  // the cursor each time, so it always self-corrects.
+  svg.addEventListener('pointermove', (e) => {
+    const node = e.target.closest?.('g[data-player]');
+    const id = node ? node.getAttribute('data-player') : null;
+    if (id !== state.hoverPlayerId) { state.hoverPlayerId = id; render(); }
+  });
+  svg.addEventListener('pointerleave', () => {
+    if (state.hoverPlayerId !== null) { state.hoverPlayerId = null; render(); }
   });
   return svg;
 }
@@ -351,7 +364,9 @@ function renderSide() {
   // unassigned (shared-channel) actions this night
   const unassigned = nightActions().filter((a) => !a.actor_player_id);
   if (unassigned.length && !state.readOnly) {
-    side.appendChild(h('h3', {}, `Needs an actor (${unassigned.length})`));
+    side.appendChild(h('div', { class: 'editor-head' },
+      h('h3', {}, `Needs an actor (${unassigned.length})`),
+      rematchButton()));
     for (const a of unassigned) {
       side.appendChild(h('div', { class: 'mini-action', onclick: () => { state.selectedActionId = a.id; render(); } },
         h('span', { class: 'mono' }, a.raw_text || `${a.ability_name ?? '?'} -> ${a.target_name ?? a.target_raw ?? '?'}`),
@@ -369,6 +384,76 @@ function renderSide() {
       state.readOnly ? 'Final board.' : 'Hover a player; click an arrow to edit it.'));
   }
   return side;
+}
+
+// ---- re-match: re-run attribution/resolution on unresolved scraped actions -
+// Scraped actions are only matched once, at scrape time; if players, aliases,
+// abilities, or mod accounts were added afterwards, existing rows stay
+// unresolved forever (re-scraping skips them as duplicates). This re-derives
+// them from raw_text using the CURRENT config: fills missing actors from the
+// source channel, resolves abilities/targets, and deletes rows authored by a
+// listed mod account. Host edits are safe - only needs_review rows are touched,
+// and non-null fields are never overwritten.
+const channelNorm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function playerForChannel(channelName) {
+  const cn = channelNorm(channelName);
+  if (!cn) return null;
+  for (const p of players()) {
+    for (const key of [p.channel_name, p.display_name, ...(p.aliases ?? [])]) {
+      if (key && channelNorm(key) === cn) return p;
+    }
+  }
+  return null;
+}
+
+async function rematchAll() {
+  const mods = (state.data.game.mod_accounts ?? [])
+    .map((m) => String(m).trim().toLowerCase()).filter(Boolean);
+  let updated = 0; let deleted = 0; let remaining = 0;
+  const targets = actions().filter((a) => a.source === 'scraped' && a.needs_review);
+  for (const a of targets) {
+    if (a.actor_raw && mods.includes(String(a.actor_raw).trim().toLowerCase())) {
+      await rpc('delete_action', { p_game_id: state.gameId, p_pin: state.pin, p_action_id: a.id });
+      deleted += 1;
+      continue;
+    }
+    const actor = a.actor_player_id ?? playerForChannel(a.source_channel)?.id ?? null;
+    const spans = parseMessage(a.raw_text ?? '', players(), abilities()).filter(isRecordableAction);
+    const span = spans[a.span_index ?? 0] ?? spans[0] ?? null;
+    const ability = a.ability_id ?? span?.ability.id ?? null;
+    const target = a.target_player_id ?? span?.target.player?.id ?? null;
+    const needsReview = !(actor && ability && target);
+    if (needsReview) remaining += 1;
+    const changed = actor !== a.actor_player_id || ability !== a.ability_id
+      || target !== a.target_player_id || needsReview !== a.needs_review;
+    if (!changed) continue;
+    await rpc('upsert_action', {
+      p_game_id: state.gameId, p_pin: state.pin, p_action_id: a.id,
+      p_night_number: a.night_number, p_actor_player_id: actor,
+      p_ability_id: ability, p_target_player_id: target,
+      p_result: a.result, p_raw_text: a.raw_text, p_needs_review: needsReview,
+    });
+    updated += 1;
+  }
+  return { scanned: targets.length, updated, deleted, remaining };
+}
+
+function rematchButton() {
+  return h('button', { class: 'ghost small', title: 'Re-run matching on unresolved actions using the current players/abilities/mods',
+    onclick: async (e) => {
+      const btn = e.target;
+      btn.disabled = true; btn.textContent = 'Re-matching...';
+      try {
+        const r = await rematchAll();
+        await refresh();
+        state.error = '';
+        const st = $('scrape-status');
+        st.hidden = false; st.className = 'scrape-status';
+        st.textContent = `Re-match: ${r.scanned} unresolved scanned, ${r.updated} updated, `
+          + `${r.deleted} mod message(s) removed, ${r.remaining} still need review.`;
+      } catch (err) { state.error = err.message || String(err); }
+      render();
+    } }, 'Re-match');
 }
 
 function splashRow(a) {
@@ -418,6 +503,9 @@ function field(label, control) {
 // ---- actions tab ----------------------------------------------------------
 function renderActionsEditor() {
   const wrap = h('div', { class: 'stack' });
+  wrap.appendChild(h('div', { style: 'display:flex;gap:10px;align-items:center' },
+    rematchButton(),
+    h('span', { class: 'muted small' }, 'Re-run matching on unresolved actions after editing players, aliases, abilities, or mods.')));
   wrap.appendChild(h('button', { class: 'primary', onclick: () => mutate(() => rpc('upsert_action', {
     p_game_id: state.gameId, p_pin: state.pin, p_action_id: null, p_night_number: state.night,
     p_actor_player_id: null, p_ability_id: null, p_target_player_id: null,
@@ -548,8 +636,20 @@ $('scrape-btn').addEventListener('click', async () => {
     await refresh();
     render();
   } catch (e) {
+    // FunctionsHttpError carries the response; surface the function's own
+    // error text instead of the generic "non-2xx status code" message.
+    let msg = e.message || String(e);
+    try {
+      if (e.context && typeof e.context.json === 'function') {
+        const body = await e.context.json();
+        if (body?.error) msg = body.error;
+      }
+    } catch { /* keep the generic message */ }
+    if (/Failed to send a request|Failed to fetch/i.test(msg)) {
+      msg += ' - is the "scrape" Edge Function deployed to this Supabase project? (See GO-LIVE.md 3a.)';
+    }
     scrapeStatusEl.className = 'scrape-status needs-review';
-    scrapeStatusEl.textContent = `Scrape failed: ${e.message || e}`;
+    scrapeStatusEl.textContent = `Scrape failed: ${msg}`;
   } finally {
     btn.disabled = false;
   }

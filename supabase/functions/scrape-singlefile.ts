@@ -23,6 +23,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+
 // ===== parser =====
 // Parses a Discord message's bolded text into an ability + target. The ability
 // catalog and the player roster (with channels + aliases) are passed in - both
@@ -201,6 +202,7 @@ function isRecordableAction(action) {
   return action.fromBold && action.looksLikeAction;
 }
 
+
 // ===== discord REST =====
 // Reads channel history over Discord's REST API. No Gateway/websocket, so
 // nothing needs to run continuously - this is called on demand by the
@@ -323,6 +325,7 @@ async function fetchRecentSince(channelId, notBefore, token = process.env.DISCOR
   return all.sort(bySnowflakeAsc);
 }
 
+
 // ===== scraper core =====
 // Scraper logic shared between the Node cron script (src/scrape.js, runs via
 // GitHub Actions) and the Supabase Edge Function
@@ -370,43 +373,48 @@ function isIgnoredAuthor(author, mods = []) {
   return false;
 }
 
-// One action per Discord message (the unique key is game + message id): take
-// the first bolded, action-shaped span. Extra actions in one message are the
-// host's to add by hand.
+// Every recordable action in a message, in order. A single message can carry
+// several bolded actions (e.g. the mafia channel posting the whole faction's
+// night in one message) - each becomes its own row, keyed by span index.
+function recordableActions(content, players, abilities) {
+  return parseMessage(content, players, abilities).filter(isRecordableAction);
+}
+
+// Kept for compatibility; prefer recordableActions.
 function firstAction(content, players, abilities) {
-  for (const candidate of parseMessage(content, players, abilities)) {
-    if (isRecordableAction(candidate)) return candidate;
-  }
-  return null;
+  return recordableActions(content, players, abilities)[0] ?? null;
 }
 
 /**
  * Pure mapping from fetched Discord messages to `actions` rows for one channel.
- * `actor` is the channel's owning player (null for shared channels).
+ * `actor` is the channel's owning player (null for shared channels). One row
+ * per recordable bolded span (unique key: game + message id + span_index).
  */
 function buildActionRows(messages, { game, channel, actor, players, abilities, mods = [] }) {
   const rows = [];
   for (const message of messages) {
     if (isIgnoredAuthor(message.author, mods)) continue;
-    const action = firstAction(message.content, players, abilities);
-    if (!action) continue;
-    rows.push({
-      game_id: game.id,
-      night_number: game.current_night_number,
-      actor_player_id: actor?.id ?? null,
-      ability_id: action.ability.id,
-      target_player_id: action.target.player?.id ?? null,
-      result: null,
-      source: 'scraped',
-      source_channel: channel.name,
-      discord_message_id: message.id,
-      raw_text: message.content,
-      actor_raw: message.author?.global_name ?? message.author?.username ?? null,
-      ability_raw: action.ability.raw,
-      target_raw: action.target.raw,
-      // A shared channel (no personal-channel owner) needs the host to assign
-      // the actor, so it always needs review.
-      needs_review: !actor || action.needsReview,
+    const actions = recordableActions(message.content, players, abilities);
+    actions.forEach((action, spanIndex) => {
+      rows.push({
+        game_id: game.id,
+        night_number: game.current_night_number,
+        actor_player_id: actor?.id ?? null,
+        ability_id: action.ability.id,
+        target_player_id: action.target.player?.id ?? null,
+        result: null,
+        source: 'scraped',
+        source_channel: channel.name,
+        discord_message_id: message.id,
+        span_index: spanIndex,
+        raw_text: message.content,
+        actor_raw: message.author?.global_name ?? message.author?.username ?? null,
+        ability_raw: action.ability.raw,
+        target_raw: action.target.raw,
+        // A shared channel (no personal-channel owner) needs the host to assign
+        // the actor, so it always needs review.
+        needs_review: !actor || action.needsReview,
+      });
     });
   }
   return rows;
@@ -453,6 +461,7 @@ async function scrapeGame({ discord, db, guildId, excludedChannels, game, player
 
   return { channels: channels.length, messages: totalMsgs, inserted: totalInserted, perChannel };
 }
+
 
 // ===== handler =====
 // Supabase Edge Function: on-demand scrape, triggered by the "Scrape now"

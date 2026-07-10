@@ -94,6 +94,31 @@ test('bot messages and chatter are skipped', () => {
   assert.equal(rows[0].discord_message_id, '3');
 });
 
+test('a message with several bolded actions yields one row per span (mafia channel)', () => {
+  const players = [
+    { id: 'p1', display_name: 'Rottweiler', channel_name: 'rottweiler', aliases: [] },
+    { id: 'p2', display_name: 'Irish Wolfhound', channel_name: 'irish-wolfhound', aliases: [] },
+    { id: 'p3', display_name: 'Beagle', channel_name: 'beagle', aliases: [] },
+  ];
+  const abilities = [
+    { id: 'ab-kill', name: 'Faction Kill', aliases: ['faction kill', 'kill'] },
+    { id: 'ab-inv', name: 'Investigate', aliases: ['investigate'] },
+  ];
+  const rows = buildActionRows(
+    [{ id: '50', author: { username: 'mafioso' },
+       content: '**Faction Kill - Rottweiler by Luka** **Steal Goal - on Irish Wolfhound** **Investigate - Beagle**' }],
+    { game: { id: 'g', current_night_number: 1 }, channel: { name: 'mafia' },
+      actor: null, players, abilities },
+  );
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((r) => r.span_index), [0, 1, 2]);
+  assert.equal(rows[0].ability_id, 'ab-kill');
+  assert.equal(rows[2].ability_id, 'ab-inv');
+  assert.equal(rows[2].target_player_id, 'p3');
+  assert.ok(rows.every((r) => r.needs_review)); // shared channel: actors unassigned
+  assert.ok(rows.every((r) => r.discord_message_id === '50'));
+});
+
 test('unresolved target in a personal channel still records, flagged', () => {
   const [row] = buildActionRows(
     [msg('30', 'Axatar', '**cop: nobody**')],
