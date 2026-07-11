@@ -71,10 +71,10 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   background: radial-gradient(circle at 50% 46%, #15172d 0%, #0b0d18 72%);
   border: 1px solid var(--border); border-radius: 18px; }
 .graph { width: 100%; height: auto; display: block; }
-.node-label { fill: var(--text); font-size: 12.5px; font-weight: 600; font-family: system-ui, sans-serif; }
+.node-label { fill: var(--text); font-size: 18px; font-weight: 600; font-family: system-ui, sans-serif; }
 .graph-legend { position: absolute; top: 14px; left: 16px; display: flex; flex-direction: column; gap: 6px;
   background: rgba(10,12,22,0.5); padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
-.graph-legend div { display: flex; align-items: center; gap: 7px; font-size: 0.78rem; color: var(--text-dim); }
+.graph-legend div { display: flex; align-items: center; gap: 7px; font-size: 0.85rem; color: var(--text-dim); }
 .graph-legend .sw { width: 14px; height: 3px; border-radius: 2px; }
 .details { width: 300px; flex: none; background: var(--panel); border: 1px solid var(--border);
   border-radius: 18px; padding: 16px 18px; max-height: 640px; overflow-y: auto; }
@@ -115,3 +115,12 @@ textarea { background: var(--panel-raised); border: 1px solid var(--border); bor
   .details { width: auto; max-height: none; }
   .editor.row { grid-template-columns: 1fr 1fr; }
 }
+
+/* night window rows (Settings) */
+.night-row { display: grid; grid-template-columns: 90px 1fr 1fr auto; gap: 12px;
+  align-items: end; margin-top: 12px; }
+.night-row b { padding-bottom: 9px; }
+
+/* bigger board */
+main, .page-header { max-width: 1480px; }
+.details { max-height: 1000px; }

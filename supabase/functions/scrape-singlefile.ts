@@ -13,7 +13,6 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
-
 // ===== cors =====
 // The dashboard on GitHub Pages calls this function from a different origin,
 // so it needs CORS headers on every response, including the preflight OPTIONS
@@ -22,7 +21,6 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-
 
 // ===== parser =====
 // Parses a Discord message's bolded text into an ability + target. The ability
@@ -202,7 +200,6 @@ function isRecordableAction(action) {
   return action.fromBold && action.looksLikeAction;
 }
 
-
 // ===== discord REST =====
 // Reads channel history over Discord's REST API. No Gateway/websocket, so
 // nothing needs to run continuously - this is called on demand by the
@@ -325,7 +322,6 @@ async function fetchRecentSince(channelId, notBefore, token = process.env.DISCOR
   return all.sort(bySnowflakeAsc);
 }
 
-
 // ===== scraper core =====
 // Scraper logic shared between the Node cron script (src/scrape.js, runs via
 // GitHub Actions) and the Supabase Edge Function
@@ -373,6 +369,29 @@ function isIgnoredAuthor(author, mods = []) {
   return false;
 }
 
+/**
+ * Assigns a message timestamp to a night using the host-defined windows
+ * (nights: [{ night_number, started_at, ends_at }]). Rules:
+ *  - no windows defined (or no usable timestamp) -> fallback night, keep.
+ *  - timestamp inside a window (ends_at null = still open) -> that night.
+ *  - windows defined but timestamp outside all of them -> skip (day-phase
+ *    chatter is not a night action).
+ */
+function nightForTimestamp(ts, nights = [], fallback = 1) {
+  const windows = (nights ?? []).filter((n) => n.started_at);
+  const t = ts ? new Date(ts).getTime() : NaN;
+  if (windows.length === 0 || Number.isNaN(t)) return { night: fallback, skip: false };
+  let best = null;
+  for (const w of windows) {
+    const start = new Date(w.started_at).getTime();
+    const end = w.ends_at ? new Date(w.ends_at).getTime() : Infinity;
+    if (t >= start && t <= end && (!best || start > best.start)) {
+      best = { start, night: w.night_number };
+    }
+  }
+  return best ? { night: best.night, skip: false } : { night: null, skip: true };
+}
+
 // Every recordable action in a message, in order. A single message can carry
 // several bolded actions (e.g. the mafia channel posting the whole faction's
 // night in one message) - each becomes its own row, keyed by span index.
@@ -390,15 +409,17 @@ function firstAction(content, players, abilities) {
  * `actor` is the channel's owning player (null for shared channels). One row
  * per recordable bolded span (unique key: game + message id + span_index).
  */
-function buildActionRows(messages, { game, channel, actor, players, abilities, mods = [] }) {
+function buildActionRows(messages, { game, channel, actor, players, abilities, mods = [], nights = [] }) {
   const rows = [];
   for (const message of messages) {
     if (isIgnoredAuthor(message.author, mods)) continue;
+    const { night, skip } = nightForTimestamp(message.timestamp, nights, game.current_night_number);
+    if (skip) continue;
     const actions = recordableActions(message.content, players, abilities);
     actions.forEach((action, spanIndex) => {
       rows.push({
         game_id: game.id,
-        night_number: game.current_night_number,
+        night_number: night,
         actor_player_id: actor?.id ?? null,
         ability_id: action.ability.id,
         target_player_id: action.target.player?.id ?? null,
@@ -407,6 +428,7 @@ function buildActionRows(messages, { game, channel, actor, players, abilities, m
         source_channel: channel.name,
         discord_message_id: message.id,
         span_index: spanIndex,
+        posted_at: message.timestamp ?? null,
         raw_text: message.content,
         actor_raw: message.author?.global_name ?? message.author?.username ?? null,
         ability_raw: action.ability.raw,
@@ -429,7 +451,7 @@ function buildActionRows(messages, { game, channel, actor, players, abilities, m
  * A channel that errors (e.g. the bot can't read it) is skipped, not fatal.
  * Returns { channels, messages, inserted, perChannel }.
  */
-async function scrapeGame({ discord, db, guildId, excludedChannels, game, players, abilities, mods = [] }) {
+async function scrapeGame({ discord, db, guildId, excludedChannels, game, players, abilities, mods = [], nights = [] }) {
   const channels = (await discord.listTextChannels(guildId))
     .filter((c) => !excludedChannels.includes(c.name.toLowerCase()));
 
@@ -445,7 +467,7 @@ async function scrapeGame({ discord, db, guildId, excludedChannels, game, player
         ? await discord.fetchMessagesAfter(channel.id, cursor)
         : await discord.fetchRecentSince(channel.id, new Date(game.created_at));
 
-      const rows = buildActionRows(messages, { game, channel, actor, players, abilities, mods });
+      const rows = buildActionRows(messages, { game, channel, actor, players, abilities, mods, nights });
       let inserted = 0;
       for (const row of rows) {
         if (await db.insertAction(row)) inserted += 1;
@@ -461,7 +483,6 @@ async function scrapeGame({ discord, db, guildId, excludedChannels, game, player
 
   return { channels: channels.length, messages: totalMsgs, inserted: totalInserted, perChannel };
 }
-
 
 // ===== handler =====
 // Supabase Edge Function: on-demand scrape, triggered by the "Scrape now"
@@ -536,12 +557,14 @@ Deno.serve(async (req) => {
   if (pinErr) return json({ error: pinErr.message }, 500);
   if (!pinOk) return json({ error: 'Invalid PIN' }, 403);
 
-  const [{ data: players, error: pErr }, { data: abilities, error: aErr }] = await Promise.all([
+  const [{ data: players, error: pErr }, { data: abilities, error: aErr }, { data: nights, error: nErr }] = await Promise.all([
     supabase.from('players').select('id, display_name, channel_name, aliases').eq('game_id', gameId),
     supabase.from('abilities').select('id, name, aliases, effect_text, computable_type, splash_text').eq('game_id', gameId),
+    supabase.from('nights').select('night_number, started_at, ends_at').eq('game_id', gameId),
   ]);
   if (pErr) return json({ error: pErr.message }, 500);
   if (aErr) return json({ error: aErr.message }, 500);
+  if (nErr) return json({ error: nErr.message }, 500);
 
   async function getLatestMessageId(gid: string, channelName: string) {
     const { data, error } = await supabase
@@ -581,6 +604,7 @@ Deno.serve(async (req) => {
       players: players ?? [],
       abilities: abilities ?? [],
       mods: game.mod_accounts ?? [],
+      nights: nights ?? [],
     });
     return json({ ok: true, game: game.name, ...result });
   } catch (err) {

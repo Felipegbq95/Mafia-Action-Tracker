@@ -14,6 +14,18 @@ const CT_LABEL = {
   redirect: 'Redirect', roleblock: 'Roleblock', none: 'Other',
 };
 const COMPUTABLE_TYPES = ['none', 'kill', 'save', 'track', 'watch', 'redirect', 'roleblock'];
+const UNRESOLVED_COLOR = '#6b6f8c';
+// Distinct stable hues (golden-angle walk) for players and abilities.
+const hueColor = (i, sat = 70, lig = 62) => `hsl(${Math.round(i * 137.508) % 360} ${sat}% ${lig}%)`;
+const abilityColor = (abilityId) => {
+  if (!abilityId) return UNRESOLVED_COLOR;
+  const i = abilities().findIndex((ab) => ab.id === abilityId);
+  return i < 0 ? UNRESOLVED_COLOR : hueColor(i);
+};
+const playerColor = (playerId) => {
+  const i = players().findIndex((p) => p.id === playerId);
+  return i < 0 ? '#3a3e5c' : hueColor(i, 60, 66);
+};
 
 if (SUPABASE_URL.includes('YOUR-PROJECT') || SUPABASE_ANON_KEY.includes('YOUR-ANON-KEY')) {
   $('status').textContent = 'Not configured - set dashboard/config.js.';
@@ -97,9 +109,11 @@ const actions = () => state.data?.actions ?? [];
 const nightActions = () => actions().filter((a) => a.night_number === state.night);
 function nightNumbers() {
   const ns = new Set(actions().map((a) => a.night_number));
+  for (const n of nights()) ns.add(n.night_number);
   ns.add(state.data?.game?.current_night_number ?? 1);
   return [...ns].sort((a, b) => a - b);
 }
+const nights = () => state.data?.nights ?? [];
 const playerName = (id) => players().find((p) => p.id === id)?.display_name;
 
 // ---- render root ----------------------------------------------------------
@@ -215,7 +229,43 @@ function renderSettings() {
     } }, 'Save mods'),
     status));
   wrap.appendChild(box);
+  wrap.appendChild(renderNightWindows());
   return wrap;
+}
+
+// Night time windows: when each night started/ended, in YOUR local time.
+// The scraper uses these to put every action in the right night from its
+// Discord timestamp, and to skip messages sent outside any night (day talk).
+function renderNightWindows() {
+  const box = h('div', { class: 'editor' });
+  box.appendChild(h('h3', {}, 'Night times'));
+  box.appendChild(h('p', { class: 'muted small' },
+    'When each night started and ended (your local time). Actions are assigned '
+    + 'to nights by when the message was posted; messages outside every window '
+    + 'are ignored as day talk. Leave the end empty while a night is ongoing. '
+    + 'After changing these, run a scrape and Re-match.'));
+  const toLocal = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const p = (x) => String(x).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const byNum = new Map(nights().map((n) => [n.night_number, n]));
+  for (const num of nightNumbers()) {
+    const rec = byNum.get(num) ?? { night_number: num, started_at: null, ends_at: null };
+    const start = h('input', { type: 'datetime-local', value: toLocal(rec.started_at) });
+    const end = h('input', { type: 'datetime-local', value: toLocal(rec.ends_at) });
+    const save = () => mutate(() => rpc('upsert_night', {
+      p_game_id: state.gameId, p_pin: state.pin, p_night: num,
+      p_started_at: start.value ? new Date(start.value).toISOString() : null,
+      p_ends_at: end.value ? new Date(end.value).toISOString() : null,
+    }));
+    box.appendChild(h('div', { class: 'night-row' },
+      h('b', {}, `Night ${num}`),
+      field('Started', start), field('Ended', end),
+      h('button', { class: 'ghost small', onclick: save }, 'Save')));
+  }
+  return box;
 }
 
 // ---- board (graph + side) -------------------------------------------------
@@ -233,8 +283,8 @@ function drawGraph() {
   const roster = players();
   const na = nightActions();
   const idIndex = new Map(roster.map((p, i) => [p.id, i]));
-  const W = 900, H = 600, cx = W / 2, cy = H / 2, nodeR = 8;
-  const R = Math.min(240, 140 + roster.length * 8);
+  const W = 1400, H = 1000, cx = W / 2, cy = H / 2, nodeR = 13;
+  const R = Math.min(440, 220 + roster.length * 12);
   const pts = roster.map((_, i) => {
     const a = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(1, roster.length);
     return { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), a };
@@ -255,9 +305,9 @@ function drawGraph() {
 
   const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'graph' });
   const defs = svgEl('defs');
-  const colors = new Set(drawable.map((a) => CT_COLOR[a.computable_type] ?? CT_COLOR.none));
+  const colors = new Set(drawable.map((a) => abilityColor(a.ability_id)));
   for (const c of colors) {
-    const m = svgEl('marker', { id: `mk-${c.replace('#', '')}`, viewBox: '0 0 10 10', refX: '9', refY: '5',
+    const m = svgEl('marker', { id: `mk-${c.replace(/[^a-z0-9]/gi, '')}`, viewBox: '0 0 10 10', refX: '9', refY: '5',
       markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });
     m.appendChild(svgEl('path', { d: 'M0,0 L10,5 L0,10 z', fill: c }));
     defs.appendChild(m);
@@ -267,17 +317,17 @@ function drawGraph() {
   for (const a of drawable) {
     const s = pts[idIndex.get(a.actor_player_id)], t = pts[idIndex.get(a.target_player_id)];
     if (s === t) continue;
-    const c = CT_COLOR[a.computable_type] ?? CT_COLOR.none;
+    const c = abilityColor(a.ability_id);
     const dimmed = hover && !(a.actor_player_id === hover || a.target_player_id === hover);
     const dx = t.x - s.x, dy = t.y - s.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
     const sx = s.x + ux * (nodeR + 3), sy = s.y + uy * (nodeR + 3);
-    const ex = t.x - ux * (nodeR + 11), ey = t.y - uy * (nodeR + 11);
+    const ex = t.x - ux * (nodeR + 16), ey = t.y - uy * (nodeR + 16);
     const mx = (sx + ex) / 2, my = (sy + ey) / 2, kx = mx + (cx - mx) * 0.28, ky = my + (cy - my) * 0.28;
     const path = svgEl('path', {
       d: `M${sx},${sy} Q${kx},${ky} ${ex},${ey}`, fill: 'none', stroke: c,
-      'stroke-width': a.id === state.selectedActionId ? 4 : (a.needs_review ? 2 : 2.6),
-      'stroke-dasharray': a.needs_review ? '5 5' : 'none',
-      opacity: dimmed ? 0.12 : 0.92, 'marker-end': `url(#mk-${c.replace('#', '')})`,
+      'stroke-width': a.id === state.selectedActionId ? 6 : (a.needs_review ? 3 : 4),
+      'stroke-dasharray': a.needs_review ? '8 8' : 'none',
+      opacity: dimmed ? 0.12 : 0.92, 'marker-end': `url(#mk-${c.replace(/[^a-z0-9]/gi, '')})`,
       style: 'cursor:pointer',
     });
     path.addEventListener('click', () => { state.selectedActionId = a.id; render(); });
@@ -290,13 +340,14 @@ function drawGraph() {
     const dimmed = hover && !incident.has(p.id);
     const g = svgEl('g', { style: 'cursor:pointer', 'data-player': p.id });
     g.appendChild(svgEl('circle', { cx: pt.x, cy: pt.y, r: nodeR,
-      fill: acted ? '#e8e9f3' : '#3a3e5c',
-      stroke: state.hoverPlayerId === p.id ? '#e0454f' : 'rgba(255,255,255,0.15)',
-      'stroke-width': state.hoverPlayerId === p.id ? 2.5 : 1, opacity: dimmed ? 0.3 : 1 }));
+      fill: playerColor(p.id),
+      'fill-opacity': acted ? 1 : 0.35,
+      stroke: state.hoverPlayerId === p.id ? '#ffffff' : 'rgba(255,255,255,0.25)',
+      'stroke-width': state.hoverPlayerId === p.id ? 3 : 1.5, opacity: dimmed ? 0.3 : 1 }));
     const out = Math.cos(pt.a) >= 0 ? 1 : -1;
     const anchor = Math.abs(Math.cos(pt.a)) < 0.35 ? 'middle' : (out > 0 ? 'start' : 'end');
-    const label = svgEl('text', { x: anchor === 'middle' ? pt.x : pt.x + out * 13,
-      y: pt.y + (Math.sin(pt.a) > 0.35 ? 22 : Math.sin(pt.a) < -0.35 ? -13 : 4),
+    const label = svgEl('text', { x: anchor === 'middle' ? pt.x : pt.x + out * 20,
+      y: pt.y + (Math.sin(pt.a) > 0.35 ? 34 : Math.sin(pt.a) < -0.35 ? -20 : 6),
       'text-anchor': anchor, class: 'node-label', opacity: dimmed ? 0.3 : 1 });
     label.textContent = p.display_name;
     g.appendChild(label);
@@ -320,10 +371,13 @@ function drawGraph() {
 }
 
 function renderLegend() {
-  const types = [...new Set(nightActions().filter((a) => a.actor_player_id && a.target_player_id)
-    .map((a) => a.computable_type))];
+  const ids = [...new Set(nightActions().filter((a) => a.actor_player_id && a.target_player_id)
+    .map((a) => a.ability_id))];
   const box = h('div', { class: 'graph-legend' });
-  for (const t of types) box.appendChild(h('div', {}, h('span', { class: 'sw', style: `background:${CT_COLOR[t] ?? CT_COLOR.none}` }), CT_LABEL[t] ?? t));
+  for (const id of ids) {
+    const name = id ? (abilities().find((ab) => ab.id === id)?.name ?? '?') : 'Unresolved';
+    box.appendChild(h('div', {}, h('span', { class: 'sw', style: `background:${abilityColor(id)}` }), name));
+  }
   return box;
 }
 
@@ -343,7 +397,7 @@ function renderPlayerDetails(pid) {
     for (const a of list) {
       const other = outgoing ? (a.target_name ?? a.target_raw ?? '?') : (a.actor_name ?? a.actor_raw ?? 'unassigned');
       b.appendChild(h('div', { class: 'detail-row' },
-        h('span', { class: 'dot', style: `background:${CT_COLOR[a.computable_type] ?? CT_COLOR.none}` }),
+        h('span', { class: 'dot', style: `background:${abilityColor(a.ability_id)}` }),
         h('span', {}, h('b', {}, effectLabel(a)), ` ${outgoing ? '->' : 'from'} `, h('b', {}, other),
           a.result ? h('span', { class: 'result-tag' }, ` = ${a.result}`) : null)));
       if (a.splash_text && !outgoing) b.appendChild(h('div', { class: 'detail-raw' }, `splash: ${a.splash_text}`));
@@ -422,14 +476,27 @@ async function rematchAll() {
     const span = spans[a.span_index ?? 0] ?? spans[0] ?? null;
     const ability = a.ability_id ?? span?.ability.id ?? null;
     const target = a.target_player_id ?? span?.target.player?.id ?? null;
+    // if night windows are set and we know when the message was posted,
+    // put the action in the right night
+    let night = a.night_number;
+    if (a.posted_at) {
+      const t = new Date(a.posted_at).getTime();
+      for (const w of nights()) {
+        if (!w.started_at) continue;
+        const ws = new Date(w.started_at).getTime();
+        const we = w.ends_at ? new Date(w.ends_at).getTime() : Infinity;
+        if (t >= ws && t <= we) { night = w.night_number; break; }
+      }
+    }
     const needsReview = !(actor && ability && target);
     if (needsReview) remaining += 1;
     const changed = actor !== a.actor_player_id || ability !== a.ability_id
-      || target !== a.target_player_id || needsReview !== a.needs_review;
+      || target !== a.target_player_id || needsReview !== a.needs_review
+      || night !== a.night_number;
     if (!changed) continue;
     await rpc('upsert_action', {
       p_game_id: state.gameId, p_pin: state.pin, p_action_id: a.id,
-      p_night_number: a.night_number, p_actor_player_id: actor,
+      p_night_number: night, p_actor_player_id: actor,
       p_ability_id: ability, p_target_player_id: target,
       p_result: a.result, p_raw_text: a.raw_text, p_needs_review: needsReview,
     });

@@ -45,6 +45,29 @@ export function isIgnoredAuthor(author, mods = []) {
   return false;
 }
 
+/**
+ * Assigns a message timestamp to a night using the host-defined windows
+ * (nights: [{ night_number, started_at, ends_at }]). Rules:
+ *  - no windows defined (or no usable timestamp) -> fallback night, keep.
+ *  - timestamp inside a window (ends_at null = still open) -> that night.
+ *  - windows defined but timestamp outside all of them -> skip (day-phase
+ *    chatter is not a night action).
+ */
+export function nightForTimestamp(ts, nights = [], fallback = 1) {
+  const windows = (nights ?? []).filter((n) => n.started_at);
+  const t = ts ? new Date(ts).getTime() : NaN;
+  if (windows.length === 0 || Number.isNaN(t)) return { night: fallback, skip: false };
+  let best = null;
+  for (const w of windows) {
+    const start = new Date(w.started_at).getTime();
+    const end = w.ends_at ? new Date(w.ends_at).getTime() : Infinity;
+    if (t >= start && t <= end && (!best || start > best.start)) {
+      best = { start, night: w.night_number };
+    }
+  }
+  return best ? { night: best.night, skip: false } : { night: null, skip: true };
+}
+
 // Every recordable action in a message, in order. A single message can carry
 // several bolded actions (e.g. the mafia channel posting the whole faction's
 // night in one message) - each becomes its own row, keyed by span index.
@@ -62,15 +85,17 @@ export function firstAction(content, players, abilities) {
  * `actor` is the channel's owning player (null for shared channels). One row
  * per recordable bolded span (unique key: game + message id + span_index).
  */
-export function buildActionRows(messages, { game, channel, actor, players, abilities, mods = [] }) {
+export function buildActionRows(messages, { game, channel, actor, players, abilities, mods = [], nights = [] }) {
   const rows = [];
   for (const message of messages) {
     if (isIgnoredAuthor(message.author, mods)) continue;
+    const { night, skip } = nightForTimestamp(message.timestamp, nights, game.current_night_number);
+    if (skip) continue;
     const actions = recordableActions(message.content, players, abilities);
     actions.forEach((action, spanIndex) => {
       rows.push({
         game_id: game.id,
-        night_number: game.current_night_number,
+        night_number: night,
         actor_player_id: actor?.id ?? null,
         ability_id: action.ability.id,
         target_player_id: action.target.player?.id ?? null,
@@ -79,6 +104,7 @@ export function buildActionRows(messages, { game, channel, actor, players, abili
         source_channel: channel.name,
         discord_message_id: message.id,
         span_index: spanIndex,
+        posted_at: message.timestamp ?? null,
         raw_text: message.content,
         actor_raw: message.author?.global_name ?? message.author?.username ?? null,
         ability_raw: action.ability.raw,
@@ -101,7 +127,7 @@ export function buildActionRows(messages, { game, channel, actor, players, abili
  * A channel that errors (e.g. the bot can't read it) is skipped, not fatal.
  * Returns { channels, messages, inserted, perChannel }.
  */
-export async function scrapeGame({ discord, db, guildId, excludedChannels, game, players, abilities, mods = [] }) {
+export async function scrapeGame({ discord, db, guildId, excludedChannels, game, players, abilities, mods = [], nights = [] }) {
   const channels = (await discord.listTextChannels(guildId))
     .filter((c) => !excludedChannels.includes(c.name.toLowerCase()));
 
@@ -117,7 +143,7 @@ export async function scrapeGame({ discord, db, guildId, excludedChannels, game,
         ? await discord.fetchMessagesAfter(channel.id, cursor)
         : await discord.fetchRecentSince(channel.id, new Date(game.created_at));
 
-      const rows = buildActionRows(messages, { game, channel, actor, players, abilities, mods });
+      const rows = buildActionRows(messages, { game, channel, actor, players, abilities, mods, nights });
       let inserted = 0;
       for (const row of rows) {
         if (await db.insertAction(row)) inserted += 1;

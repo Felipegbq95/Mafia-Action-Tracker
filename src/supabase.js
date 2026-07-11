@@ -31,6 +31,15 @@ export async function getPlayers(supabase, gameId) {
   return data ?? [];
 }
 
+export async function getNights(supabase, gameId) {
+  const { data, error } = await supabase
+    .from('nights')
+    .select('night_number, started_at, ends_at')
+    .eq('game_id', gameId);
+  if (error) throw error;
+  return data ?? [];
+}
+
 export async function getAbilities(supabase, gameId) {
   const { data, error } = await supabase
     .from('abilities')

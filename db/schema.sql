@@ -69,6 +69,18 @@ create table if not exists abilities (
   created_at timestamptz not null default now()
 );
 
+-- Night time windows. Used to assign each scraped action to the right night
+-- from its Discord message timestamp, and to skip day-phase messages entirely
+-- (a message outside every defined window is not an action). Set by the host
+-- in the dashboard's Settings tab.
+create table if not exists nights (
+  game_id uuid not null references games(id) on delete cascade,
+  night_number int not null,
+  started_at timestamptz,
+  ends_at timestamptz,
+  primary key (game_id, night_number)
+);
+
 create table if not exists actions (
   id uuid primary key default gen_random_uuid(),
   game_id uuid not null references games(id) on delete cascade,
@@ -88,6 +100,8 @@ create table if not exists actions (
   -- which bolded span within the message this action came from (a single
   -- message can carry several actions, e.g. the mafia channel)
   span_index int not null default 0,
+  -- when the Discord message was posted (drives night assignment)
+  posted_at timestamptz,
   raw_text text,
   -- what the scraper saw before resolving, kept for review
   actor_raw text,
@@ -99,6 +113,7 @@ create table if not exists actions (
 );
 
 alter table actions add column if not exists span_index int not null default 0;
+alter table actions add column if not exists posted_at timestamptz;
 
 -- Dedup scraped spans (manual actions have a null message id, allowed many).
 -- Recreated to include span_index; the old (game_id, message_id) index from
@@ -115,6 +130,7 @@ alter table games enable row level security;
 alter table players enable row level security;
 alter table abilities enable row level security;
 alter table actions enable row level security;
+alter table nights enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
@@ -162,6 +178,10 @@ as $$
         'id', p.id, 'display_name', p.display_name,
         'channel_name', p.channel_name, 'aliases', p.aliases) order by p.display_name)
       from players p where p.game_id = p_game_id), '[]'::json),
+    'nights', coalesce((select json_agg(json_build_object(
+        'night_number', n.night_number, 'started_at', n.started_at,
+        'ends_at', n.ends_at) order by n.night_number)
+      from nights n where n.game_id = p_game_id), '[]'::json),
     'abilities', coalesce((select json_agg(json_build_object(
         'id', a.id, 'name', a.name, 'aliases', a.aliases, 'effect_text', a.effect_text,
         'computable_type', a.computable_type, 'splash_text', a.splash_text) order by a.name)
@@ -174,7 +194,7 @@ as $$
         'splash_text', ab.splash_text,
         'target_player_id', act.target_player_id, 'target_name', tp.display_name,
         'result', act.result, 'source', act.source, 'source_channel', act.source_channel,
-        'span_index', act.span_index,
+        'span_index', act.span_index, 'posted_at', act.posted_at,
         'raw_text', act.raw_text, 'actor_raw', act.actor_raw,
         'ability_raw', act.ability_raw, 'target_raw', act.target_raw,
         'needs_review', act.needs_review, 'created_at', act.created_at)
@@ -432,6 +452,23 @@ begin
 end;
 $$;
 grant execute on function set_mod_accounts(uuid, text, text[]) to anon, authenticated;
+
+-- Set a night's time window (start/end may each be null while unknown).
+create or replace function upsert_night(
+  p_game_id uuid, p_pin text, p_night int,
+  p_started_at timestamptz, p_ends_at timestamptz)
+returns void
+language plpgsql security definer set search_path = public, extensions, pg_temp
+as $$
+begin
+  perform assert_game_pin(p_game_id, p_pin);
+  insert into nights (game_id, night_number, started_at, ends_at)
+  values (p_game_id, greatest(1, p_night), p_started_at, p_ends_at)
+  on conflict (game_id, night_number)
+  do update set started_at = excluded.started_at, ends_at = excluded.ends_at;
+end;
+$$;
+grant execute on function upsert_night(uuid, text, int, timestamptz, timestamptz) to anon, authenticated;
 
 -- Finish a game: remove the PIN and lock editing; becomes public read-only.
 create or replace function archive_game(p_game_id uuid, p_pin text)

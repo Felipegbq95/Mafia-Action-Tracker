@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { listTextChannels, fetchMessagesAfter, fetchRecentSince } from './discord.js';
 import { scrapeGame, channelActor, firstAction, buildActionRows } from './scraper-core.js';
 import {
-  createSupabase, getActiveGame, getPlayers, getAbilities,
+  createSupabase, getActiveGame, getPlayers, getAbilities, getNights,
   getLatestMessageId, insertAction,
 } from './supabase.js';
 
@@ -27,9 +27,10 @@ async function main() {
     process.exit(1);
   }
 
-  const [players, abilities] = await Promise.all([
+  const [players, abilities, nights] = await Promise.all([
     getPlayers(supabase, game.id),
     getAbilities(supabase, game.id),
+    getNights(supabase, game.id),
   ]);
 
   const result = await scrapeGame({
@@ -44,6 +45,7 @@ async function main() {
     players,
     abilities,
     mods: game.mod_accounts ?? [],
+    nights,
   });
 
   for (const c of result.perChannel) {

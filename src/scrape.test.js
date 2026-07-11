@@ -128,3 +128,34 @@ test('unresolved target in a personal channel still records, flagged', () => {
   assert.equal(row.target_player_id, null);
   assert.equal(row.needs_review, true);
 });
+
+test('nights: actions are assigned by message timestamp; day messages skipped', async () => {
+  const { nightForTimestamp } = await import('./scraper-core.js');
+  const nights = [
+    { night_number: 1, started_at: '2026-07-01T21:00:00Z', ends_at: '2026-07-02T09:00:00Z' },
+    { night_number: 2, started_at: '2026-07-03T21:00:00Z', ends_at: null }, // ongoing
+  ];
+  assert.deepEqual(nightForTimestamp('2026-07-01T23:30:00Z', nights, 9), { night: 1, skip: false });
+  assert.deepEqual(nightForTimestamp('2026-07-04T02:00:00Z', nights, 9), { night: 2, skip: false });
+  // between nights = day phase -> skip
+  assert.deepEqual(nightForTimestamp('2026-07-02T15:00:00Z', nights, 9), { night: null, skip: true });
+  // no windows defined -> fallback, keep
+  assert.deepEqual(nightForTimestamp('2026-07-02T15:00:00Z', [], 9), { night: 9, skip: false });
+});
+
+test('buildActionRows uses night windows and stores posted_at', () => {
+  const players = [{ id: 'p1', display_name: 'Axatar', channel_name: 'axatar', aliases: [] }];
+  const abilities = [{ id: 'ab', name: 'Investigate', aliases: ['cop'] }];
+  const nights = [{ night_number: 2, started_at: '2026-07-03T21:00:00Z', ends_at: null }];
+  const rows = buildActionRows(
+    [
+      { id: '1', author: { username: 'x' }, content: '**cop: Axatar**', timestamp: '2026-07-04T01:00:00Z' },
+      { id: '2', author: { username: 'x' }, content: '**cop: Axatar**', timestamp: '2026-07-01T12:00:00Z' }, // before night 2 -> day, skipped
+    ],
+    { game: { id: 'g', current_night_number: 1 }, channel: { name: 'axatar' },
+      actor: players[0], players, abilities, nights },
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].night_number, 2);
+  assert.equal(rows[0].posted_at, '2026-07-04T01:00:00Z');
+});

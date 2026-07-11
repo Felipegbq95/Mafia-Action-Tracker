@@ -74,12 +74,14 @@ Deno.serve(async (req) => {
   if (pinErr) return json({ error: pinErr.message }, 500);
   if (!pinOk) return json({ error: 'Invalid PIN' }, 403);
 
-  const [{ data: players, error: pErr }, { data: abilities, error: aErr }] = await Promise.all([
+  const [{ data: players, error: pErr }, { data: abilities, error: aErr }, { data: nights, error: nErr }] = await Promise.all([
     supabase.from('players').select('id, display_name, channel_name, aliases').eq('game_id', gameId),
     supabase.from('abilities').select('id, name, aliases, effect_text, computable_type, splash_text').eq('game_id', gameId),
+    supabase.from('nights').select('night_number, started_at, ends_at').eq('game_id', gameId),
   ]);
   if (pErr) return json({ error: pErr.message }, 500);
   if (aErr) return json({ error: aErr.message }, 500);
+  if (nErr) return json({ error: nErr.message }, 500);
 
   async function getLatestMessageId(gid: string, channelName: string) {
     const { data, error } = await supabase
@@ -119,6 +121,7 @@ Deno.serve(async (req) => {
       players: players ?? [],
       abilities: abilities ?? [],
       mods: game.mod_accounts ?? [],
+      nights: nights ?? [],
     });
     return json({ ok: true, game: game.name, ...result });
   } catch (err) {
