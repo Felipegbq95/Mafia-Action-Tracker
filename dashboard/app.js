@@ -707,8 +707,50 @@ function renderPlayersEditor() {
 }
 
 // ---- abilities tab --------------------------------------------------------
+// Bulk-add abilities from a table copied out of Sheets/Excel. Spreadsheet
+// clipboard data is tab-separated: name TAB effect TAB aliases (aliases
+// comma-separated inside their cell). A header row like "name  effect ..."
+// is skipped automatically.
+async function addAbilitiesBulk(text) {
+  const lines = text.split('\n').map((l) => l.replace(/\r$/, '')).filter((l) => l.trim());
+  try {
+    for (const [i, line] of lines.entries()) {
+      const cells = line.split('\t').map((s) => s.trim());
+      const name = cells[0];
+      if (!name) continue;
+      if (i === 0 && /^(name|ability)$/i.test(name)) continue; // header row
+      const effect = cells[1] || null;
+      const aliases = (cells[2] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      await rpc('upsert_ability', {
+        p_game_id: state.gameId, p_pin: state.pin, p_ability_id: null,
+        p_name: name, p_aliases: aliases, p_effect_text: effect,
+        p_computable_type: 'none', p_splash_text: null,
+      });
+    }
+    await refresh(); state.error = '';
+  } catch (e) { state.error = e.message || String(e); }
+  render();
+}
+
 function renderAbilitiesEditor() {
   const wrap = h('div', { class: 'stack' });
+
+  const ta = h('textarea', { rows: '6',
+    placeholder: 'Paste straight from Sheets/Excel - three columns, one ability per row:\n'
+      + 'Name | Effect | Aliases (comma-separated)\n'
+      + 'Sprint\tVisits a player at high speed\tsprint, run\n'
+      + 'Faction Kill\tEliminates the target\tkill, fk' });
+  const paste = h('details', { class: 'paste-box' },
+    h('summary', {}, 'Paste a table of abilities (from Sheets/Excel)'),
+    ta,
+    h('button', { class: 'primary', onclick: () => { const t = ta.value; ta.value = ''; addAbilitiesBulk(t); } }, 'Add these'),
+    h('p', { class: 'muted small' },
+      'Copy the three columns Name, Effect, Aliases in your sheet and paste here - '
+      + 'the column breaks come along automatically. The ability name itself always '
+      + 'matches too; aliases are the other things players type. Set types and '
+      + 'splashes afterwards on the rows below.'));
+  wrap.appendChild(paste);
+
   wrap.appendChild(h('button', { class: 'primary', onclick: () => mutate(() => rpc('upsert_ability', {
     p_game_id: state.gameId, p_pin: state.pin, p_ability_id: null, p_name: 'New ability',
     p_aliases: [], p_effect_text: null, p_computable_type: 'none', p_splash_text: null,
