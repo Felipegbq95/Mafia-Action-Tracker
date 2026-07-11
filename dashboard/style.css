@@ -124,3 +124,18 @@ textarea { background: var(--panel-raised); border: 1px solid var(--border); bor
 /* bigger board */
 main, .page-header { max-width: 1480px; }
 .details { max-height: 1000px; }
+
+/* clickable legend (ability multi-select) */
+.graph-legend .leg { cursor: pointer; border-radius: 6px; padding: 3px 6px; margin: -3px -6px; }
+.graph-legend .leg:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+.graph-legend .leg.active { color: var(--text); background: rgba(255,255,255,0.10); }
+.graph-legend .leg.clear { color: var(--accent); margin-top: 4px; }
+
+/* arrow hover tooltip */
+.graph-tip { position: absolute; display: none; pointer-events: none; z-index: 5;
+  max-width: 260px; background: rgba(10,12,22,0.95); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px; font-size: 0.86rem; }
+.graph-tip .tip-name { font-weight: 700; margin-bottom: 2px; }
+.graph-tip .tip-effect { color: var(--text-dim); margin-bottom: 6px; }
+.graph-tip .tip-line { font-size: 0.82rem; }
+.graph-tip .tip-result { color: var(--warn); font-weight: 600; }

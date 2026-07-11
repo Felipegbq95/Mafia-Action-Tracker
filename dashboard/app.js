@@ -36,6 +36,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const state = {
   games: [], gameId: null, pin: null, data: null, readOnly: false,
   night: 1, tab: 'board', selectedActionId: null, hoverPlayerId: null, error: '',
+  // legend multi-select: ability ids ('' = unresolved) isolated on the board
+  abilitySel: new Set(),
 };
 
 // ---- dom helpers ----------------------------------------------------------
@@ -87,11 +89,13 @@ async function refresh() {
 }
 async function openGame(gameId, pin) {
   state.gameId = gameId; state.pin = pin; state.readOnly = false;
+  state.abilitySel = new Set();
   $('scrape-status').hidden = true;
   await refresh(); render();
 }
 async function openPublic(gameId) {
   state.gameId = gameId; state.pin = null; state.readOnly = true;
+  state.abilitySel = new Set();
   $('scrape-status').hidden = true;
   await refresh(); render();
 }
@@ -274,6 +278,7 @@ function renderBoard() {
   const graphWrap = h('div', { class: 'graph-wrap' });
   graphWrap.appendChild(drawGraph());
   graphWrap.appendChild(renderLegend());
+  graphWrap.appendChild(h('div', { class: 'graph-tip' }));
   wrap.appendChild(graphWrap);
   wrap.appendChild(renderSide());
   return wrap;
@@ -303,6 +308,17 @@ function drawGraph() {
     }
   }
 
+  // legend multi-select: only selected abilities' edges (and the players they
+  // touch) stay lit; everything else dims, like actor hover
+  const filterOn = state.abilitySel.size > 0;
+  const inFilter = (a) => !filterOn || state.abilitySel.has(a.ability_id ?? '');
+  const touched = new Set();
+  if (filterOn) {
+    for (const a of drawable) {
+      if (inFilter(a)) { touched.add(a.actor_player_id); touched.add(a.target_player_id); }
+    }
+  }
+
   const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'graph' });
   const defs = svgEl('defs');
   const colors = new Set(drawable.map((a) => abilityColor(a.ability_id)));
@@ -318,26 +334,33 @@ function drawGraph() {
     const s = pts[idIndex.get(a.actor_player_id)], t = pts[idIndex.get(a.target_player_id)];
     if (s === t) continue;
     const c = abilityColor(a.ability_id);
-    const dimmed = hover && !(a.actor_player_id === hover || a.target_player_id === hover);
+    const dimmed = !inFilter(a)
+      || (hover && !(a.actor_player_id === hover || a.target_player_id === hover));
     const dx = t.x - s.x, dy = t.y - s.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
     const sx = s.x + ux * (nodeR + 3), sy = s.y + uy * (nodeR + 3);
     const ex = t.x - ux * (nodeR + 16), ey = t.y - uy * (nodeR + 16);
     const mx = (sx + ex) / 2, my = (sy + ey) / 2, kx = mx + (cx - mx) * 0.28, ky = my + (cy - my) * 0.28;
+    const d = `M${sx},${sy} Q${kx},${ky} ${ex},${ey}`;
     const path = svgEl('path', {
-      d: `M${sx},${sy} Q${kx},${ky} ${ex},${ey}`, fill: 'none', stroke: c,
+      d, fill: 'none', stroke: c,
       'stroke-width': a.id === state.selectedActionId ? 6 : (a.needs_review ? 3 : 4),
       'stroke-dasharray': a.needs_review ? '8 8' : 'none',
       opacity: dimmed ? 0.12 : 0.92, 'marker-end': `url(#mk-${c.replace(/[^a-z0-9]/gi, '')})`,
-      style: 'cursor:pointer',
     });
-    path.addEventListener('click', () => { state.selectedActionId = a.id; render(); });
     svg.appendChild(path);
+    // invisible fat twin: easy hover target for the tooltip and easy clicking
+    const hit = svgEl('path', {
+      d, fill: 'none', stroke: 'rgba(0,0,0,0)', 'stroke-width': 22,
+      'data-action': a.id, style: 'cursor:pointer', 'pointer-events': 'stroke',
+    });
+    hit.addEventListener('click', () => { state.selectedActionId = a.id; render(); });
+    svg.appendChild(hit);
   }
 
   roster.forEach((p, i) => {
     const pt = pts[i];
     const acted = actors.has(p.id);
-    const dimmed = hover && !incident.has(p.id);
+    const dimmed = (filterOn && !touched.has(p.id)) || (hover && !incident.has(p.id));
     const g = svgEl('g', { style: 'cursor:pointer', 'data-player': p.id });
     g.appendChild(svgEl('circle', { cx: pt.x, cy: pt.y, r: nodeR,
       fill: playerColor(p.id),
@@ -362,12 +385,42 @@ function drawGraph() {
   svg.addEventListener('pointermove', (e) => {
     const node = e.target.closest?.('g[data-player]');
     const id = node ? node.getAttribute('data-player') : null;
-    if (id !== state.hoverPlayerId) { state.hoverPlayerId = id; render(); }
+    if (id !== state.hoverPlayerId) { state.hoverPlayerId = id; render(); return; }
+    updateEdgeTip(svg, e);
   });
   svg.addEventListener('pointerleave', () => {
+    hideEdgeTip(svg);
     if (state.hoverPlayerId !== null) { state.hoverPlayerId = null; render(); }
   });
   return svg;
+}
+
+// Tooltip shown while hovering an arrow: the ability's EFFECT plus who did
+// what to whom. Managed imperatively (no re-render) so it can follow the
+// pointer smoothly.
+function hideEdgeTip(svg) {
+  const tip = svg.parentElement?.querySelector('.graph-tip');
+  if (tip) tip.style.display = 'none';
+}
+function updateEdgeTip(svg, e) {
+  const wrap = svg.parentElement;
+  const tip = wrap?.querySelector('.graph-tip');
+  if (!tip) return;
+  const hitPath = e.target.closest?.('path[data-action]');
+  const a = hitPath ? actions().find((x) => x.id === hitPath.getAttribute('data-action')) : null;
+  if (!a) { tip.style.display = 'none'; return; }
+  tip.innerHTML = '';
+  tip.appendChild(h('div', { class: 'tip-name', style: `color:${abilityColor(a.ability_id)}` },
+    a.ability_name ?? a.ability_raw ?? 'Unknown ability'));
+  if (a.effect_text) tip.appendChild(h('div', { class: 'tip-effect' }, a.effect_text));
+  tip.appendChild(h('div', { class: 'tip-line' },
+    `${a.actor_name ?? a.actor_raw ?? '?'} → ${a.target_name ?? a.target_raw ?? '?'}`));
+  if (a.result) tip.appendChild(h('div', { class: 'tip-line tip-result' }, `Result: ${a.result}`));
+  if (a.needs_review) tip.appendChild(h('div', { class: 'tip-line muted' }, 'needs review'));
+  const r = wrap.getBoundingClientRect();
+  tip.style.left = `${Math.min(e.clientX - r.left + 16, r.width - 240)}px`;
+  tip.style.top = `${e.clientY - r.top + 16}px`;
+  tip.style.display = 'block';
 }
 
 function renderLegend() {
@@ -375,8 +428,22 @@ function renderLegend() {
     .map((a) => a.ability_id))];
   const box = h('div', { class: 'graph-legend' });
   for (const id of ids) {
+    const key = id ?? '';
+    const active = state.abilitySel.has(key);
     const name = id ? (abilities().find((ab) => ab.id === id)?.name ?? '?') : 'Unresolved';
-    box.appendChild(h('div', {}, h('span', { class: 'sw', style: `background:${abilityColor(id)}` }), name));
+    box.appendChild(h('div', {
+      class: 'leg' + (active ? ' active' : ''),
+      title: 'Click to isolate this ability; click more to compare several',
+      onclick: () => {
+        if (state.abilitySel.has(key)) state.abilitySel.delete(key);
+        else state.abilitySel.add(key);
+        render();
+      },
+    }, h('span', { class: 'sw', style: `background:${abilityColor(id)}` }), name));
+  }
+  if (state.abilitySel.size > 0) {
+    box.appendChild(h('div', { class: 'leg clear',
+      onclick: () => { state.abilitySel = new Set(); render(); } }, 'Clear selection'));
   }
   return box;
 }
