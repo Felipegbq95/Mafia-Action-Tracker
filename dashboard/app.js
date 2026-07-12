@@ -533,7 +533,8 @@ function playerForChannel(channelName) {
 async function rematchAll() {
   const mods = (state.data.game.mod_accounts ?? [])
     .map((m) => String(m).trim().toLowerCase()).filter(Boolean);
-  let updated = 0; let deleted = 0; let remaining = 0;
+  let updated = 0; let deleted = 0; let remaining = 0; let split = 0;
+  const splitDone = new Set();
   const targets = actions().filter((a) => a.source === 'scraped' && a.needs_review);
   for (const a of targets) {
     if (a.actor_raw && mods.includes(String(a.actor_raw).trim().toLowerCase())) {
@@ -543,6 +544,24 @@ async function rematchAll() {
     }
     const actor = a.actor_player_id ?? playerForChannel(a.source_channel)?.id ?? null;
     const spans = parseMessage(a.raw_text ?? '', players(), abilities()).filter(isRecordableAction);
+    // A message scraped before multi-action support holds several actions in
+    // one row; create the missing sibling rows (ability/target prefilled,
+    // actor left for the host) - once per message.
+    const msgKey = `${a.source_channel}||${a.night_number}||${a.raw_text}`;
+    if (spans.length > 1 && !splitDone.has(msgKey)) {
+      splitDone.add(msgKey);
+      const existing = actions().filter((x) => x.raw_text === a.raw_text
+        && x.source_channel === a.source_channel && x.night_number === a.night_number).length;
+      for (let i = existing; i < spans.length; i += 1) {
+        await rpc('upsert_action', {
+          p_game_id: state.gameId, p_pin: state.pin, p_action_id: null,
+          p_night_number: a.night_number, p_actor_player_id: null,
+          p_ability_id: spans[i].ability.id, p_target_player_id: spans[i].target.player?.id ?? null,
+          p_result: null, p_raw_text: a.raw_text, p_needs_review: true,
+        });
+        split += 1;
+      }
+    }
     const span = spans[a.span_index ?? 0] ?? spans[0] ?? null;
     const ability = a.ability_id ?? span?.ability.id ?? null;
     const target = a.target_player_id ?? span?.target.player?.id ?? null;
@@ -572,7 +591,7 @@ async function rematchAll() {
     });
     updated += 1;
   }
-  return { scanned: targets.length, updated, deleted, remaining };
+  return { scanned: targets.length, updated, deleted, remaining, split };
 }
 
 function rematchButton() {
@@ -587,6 +606,7 @@ function rematchButton() {
         const st = $('scrape-status');
         st.hidden = false; st.className = 'scrape-status';
         st.textContent = `Re-match: ${r.scanned} unresolved scanned, ${r.updated} updated, `
+          + `${r.split} split out of multi-action messages, `
           + `${r.deleted} mod message(s) removed, ${r.remaining} still need review.`;
       } catch (err) { state.error = err.message || String(err); }
       render();
