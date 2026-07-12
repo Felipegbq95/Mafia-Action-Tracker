@@ -130,12 +130,17 @@ function splitAbilityAndTarget(span, index) {
 }
 
 /**
- * Extracts every **bold** span. Falls back to the whole message (flagged) when
- * nothing is bolded, so a forgotten-bold action still surfaces rather than
- * vanishing.
+ * Extracts every **bold** span. A single bold block can carry several actions
+ * on separate lines (e.g. the mafia channel posting the faction's whole night
+ * in one bolded message), so each non-empty line inside a span becomes its own
+ * candidate action. Falls back to the whole message (flagged) when nothing is
+ * bolded, so a forgotten-bold action still surfaces rather than vanishing.
  */
 export function extractActionSpans(content) {
-  const spans = [...String(content).matchAll(BOLD_RE)].map((m) => m[1]);
+  const spans = [...String(content).matchAll(BOLD_RE)]
+    .flatMap((m) => m[1].split(/\n+/))
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (spans.length > 0) return { spans, fellBackToFullMessage: false };
   return { spans: [String(content)], fellBackToFullMessage: true };
 }

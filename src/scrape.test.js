@@ -159,3 +159,27 @@ test('buildActionRows uses night windows and stores posted_at', () => {
   assert.equal(rows[0].night_number, 2);
   assert.equal(rows[0].posted_at, '2026-07-04T01:00:00Z');
 });
+
+test('one bold block with several lines yields one action per line (mafia format)', () => {
+  const players = [
+    { id: 'p1', display_name: 'Rottweiler', channel_name: 'rottweiler', aliases: [] },
+    { id: 'p2', display_name: 'Beagle', channel_name: 'beagle', aliases: [] },
+    { id: 'p3', display_name: 'Chihuahua', channel_name: 'chihuahua', aliases: [] },
+  ];
+  const abilities = [
+    { id: 'ab-kill', name: 'Faction Kill', aliases: ['faction kill'] },
+    { id: 'ab-inv', name: 'Investigate', aliases: ['investigate'] },
+    { id: 'ab-watch', name: 'Watch Tape', aliases: ['watch tape'] },
+  ];
+  const rows = buildActionRows(
+    [{ id: '60', author: { username: 'mafioso' },
+       content: '**Faction Kill - Rottweiler\nInvestigate - Beagle\nWatch Tape - Chihuahua**' }],
+    { game: { id: 'g', current_night_number: 1 }, channel: { name: 'mafia' },
+      actor: null, players, abilities },
+  );
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].ability_id, 'ab-kill');
+  assert.equal(rows[1].ability_id, 'ab-inv');
+  assert.equal(rows[1].target_player_id, 'p2');
+  assert.equal(rows[2].ability_id, 'ab-watch');
+});

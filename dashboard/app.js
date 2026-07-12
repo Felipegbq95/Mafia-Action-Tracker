@@ -410,9 +410,12 @@ function updateEdgeTip(svg, e) {
   const a = hitPath ? actions().find((x) => x.id === hitPath.getAttribute('data-action')) : null;
   if (!a) { tip.style.display = 'none'; return; }
   tip.innerHTML = '';
-  tip.appendChild(h('div', { class: 'tip-name', style: `color:${abilityColor(a.ability_id)}` },
-    a.ability_name ?? a.ability_raw ?? 'Unknown ability'));
-  if (a.effect_text) tip.appendChild(h('div', { class: 'tip-effect' }, a.effect_text));
+  // the EFFECT is the headline (colored, bold); the ability name is the
+  // small print underneath
+  const abilityName = a.ability_name ?? a.ability_raw ?? 'Unknown ability';
+  const headline = a.effect_text ?? abilityName;
+  tip.appendChild(h('div', { class: 'tip-name', style: `color:${abilityColor(a.ability_id)}` }, headline));
+  if (a.effect_text) tip.appendChild(h('div', { class: 'tip-effect' }, abilityName));
   tip.appendChild(h('div', { class: 'tip-line' },
     `${a.actor_name ?? a.actor_raw ?? '?'} → ${a.target_name ?? a.target_raw ?? '?'}`));
   if (a.result) tip.appendChild(h('div', { class: 'tip-line tip-result' }, `Result: ${a.result}`));
@@ -624,10 +627,39 @@ function actionEditor(a, withClose) {
   const result = h('input', { value: a.result ?? '', placeholder: 'e.g. non-town' });
   result.addEventListener('change', () => save({ result: result.value || null }));
   box.appendChild(field('Result', result));
-  box.appendChild(h('button', { class: 'ghost danger small', onclick: () => mutate(() => {
+  const controls = h('div', { style: 'display:flex;gap:8px;margin-top:12px' });
+  // A message can hold several actions (the mafia channel posts the whole
+  // faction's night in one message) but old scrapes stored just one row for
+  // it. If the raw text parses into more actions than we have rows for this
+  // message, offer to split it into one editable row per action.
+  const spansHere = a.raw_text
+    ? parseMessage(a.raw_text, players(), abilities()).filter(isRecordableAction)
+    : [];
+  const siblings = actions().filter((x) =>
+    x.raw_text === a.raw_text && x.source_channel === a.source_channel
+    && x.night_number === a.night_number);
+  if (spansHere.length > 1 && siblings.length < spansHere.length) {
+    controls.appendChild(h('button', { class: 'ghost small', onclick: async () => {
+      try {
+        for (let i = siblings.length; i < spansHere.length; i += 1) {
+          const span = spansHere[i];
+          await rpc('upsert_action', {
+            p_game_id: state.gameId, p_pin: state.pin, p_action_id: null,
+            p_night_number: a.night_number, p_actor_player_id: null,
+            p_ability_id: span.ability.id, p_target_player_id: span.target.player?.id ?? null,
+            p_result: null, p_raw_text: a.raw_text, p_needs_review: true,
+          });
+        }
+        await refresh(); state.error = '';
+      } catch (e) { state.error = e.message || String(e); }
+      render();
+    } }, `Split into ${spansHere.length} actions`));
+  }
+  controls.appendChild(h('button', { class: 'ghost danger small', onclick: () => mutate(() => {
     state.selectedActionId = null;
     return rpc('delete_action', { p_game_id: state.gameId, p_pin: state.pin, p_action_id: a.id });
   }) }, 'Delete action'));
+  box.appendChild(controls);
   return box;
 }
 function field(label, control) {
