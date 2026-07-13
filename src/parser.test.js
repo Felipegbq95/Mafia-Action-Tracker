@@ -101,3 +101,31 @@ test('matchPlayer matches channel name and alias, case-insensitively', () => {
 test('matchPlayer returns null below threshold', () => {
   assert.equal(matchPlayer('zzz', PLAYERS), null);
 });
+
+test('multi-target: comma list fans into one action per target', () => {
+  const rows = parse('**Sniff - Axatar, Bramblewood, Cortez**');
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map((r) => r.target.player.id), ['1', '2', '3']);
+  assert.ok(rows.every((r) => r.raw === 'Sniff - Axatar, Bramblewood, Cortez'));
+});
+
+test('multi-target still applies fuzzy misspell matching per target', () => {
+  // "bramblewod" and "corte" are misspelled; both still resolve
+  const rows = parse('**Kill - bramblewod, corte**');
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].ability.id, 'ab-kill');
+  assert.deepEqual(rows.map((r) => r.target.player.id), ['2', '3']);
+});
+
+test('comma with only one real target stays a single action (no noise)', () => {
+  const rows = parse('**cop: Axatar, please**');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].target.player.id, '1');
+});
+
+test('unmatched parts in a multi-target list still surface, flagged', () => {
+  const rows = parse('**Kill - Axatar, Bramblewood, nobodyhere**');
+  assert.equal(rows.length, 3);
+  assert.equal(rows[2].target.player, null);
+  assert.equal(rows[2].needsReview, true);
+});

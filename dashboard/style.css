@@ -130,6 +130,10 @@ main, .page-header { max-width: 1480px; }
 .graph-legend .leg:hover { color: var(--text); background: rgba(255,255,255,0.05); }
 .graph-legend .leg.active { color: var(--text); background: rgba(255,255,255,0.10); }
 .graph-legend .leg.clear { color: var(--accent); margin-top: 4px; }
+.graph-legend .leg-divider { height: 1px; background: var(--border); margin: 6px 0 2px; }
+.graph-legend .leg-head { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-dim); }
+.graph-legend .sw-dot { width: 11px; height: 11px; border-radius: 50%; }
 
 /* arrow hover tooltip */
 .graph-tip { position: absolute; display: none; pointer-events: none; z-index: 5;

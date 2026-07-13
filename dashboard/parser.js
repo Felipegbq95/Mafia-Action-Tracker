@@ -154,11 +154,9 @@ export function parseMessage(content, players = [], abilities = []) {
   const index = buildAbilityIndex(abilities);
   const { spans, fellBackToFullMessage } = extractActionSpans(content);
 
-  return spans.map((span) => {
-    const { abilityRaw, ability, targetRaw, hadSeparator } = splitAbilityAndTarget(span, index);
+  const make = (span, abilityRaw, ability, targetRaw, hadSeparator) => {
     const targetMatch = targetRaw ? matchPlayer(targetRaw, players) : null;
     const looksLikeAction = Boolean(ability) || Boolean(targetMatch) || hadSeparator;
-
     return {
       raw: span,
       ability: { id: ability?.id ?? null, name: ability?.name ?? null, raw: abilityRaw },
@@ -168,6 +166,23 @@ export function parseMessage(content, players = [], abilities = []) {
       looksLikeAction,
       needsReview: fellBackToFullMessage || !ability || !targetMatch,
     };
+  };
+
+  return spans.flatMap((span) => {
+    const { abilityRaw, ability, targetRaw, hadSeparator } = splitAbilityAndTarget(span, index);
+    // Multi-target: some abilities name several targets in one span, comma-
+    // separated ("Sniff - Beagle, Pug, Corgi"). Fan them into one action per
+    // target - but only when at least two comma parts actually resolve to a
+    // player, so a stray comma or filler ("1, 2 and 3") doesn't explode a
+    // single action into noise. Each part still runs through the same fuzzy
+    // matcher, so a misspelled target ("shepard" -> Shepherd) resolves per part.
+    if (targetRaw && targetRaw.includes(',')) {
+      const parts = targetRaw.split(',').map((s) => s.trim()).filter(Boolean);
+      if (parts.length >= 2 && parts.filter((p) => matchPlayer(p, players)).length >= 2) {
+        return parts.map((p) => make(span, abilityRaw, ability, p, hadSeparator));
+      }
+    }
+    return [make(span, abilityRaw, ability, targetRaw, hadSeparator)];
   });
 }
 

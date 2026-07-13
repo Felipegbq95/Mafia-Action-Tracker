@@ -51,8 +51,16 @@ create table if not exists players (
   channel_name text,
   -- other names people use to target them (e.g. real name vs handle)
   aliases text[] not null default '{}',
+  -- faction, set by the host; drives the board's node/arrow colors. Null =
+  -- unknown/uncolored.
+  alignment text check (alignment in ('mafia','town','third')),
   created_at timestamptz not null default now()
 );
+alter table players add column if not exists alignment text;
+do $$ begin
+  alter table players add constraint players_alignment_chk
+    check (alignment in ('mafia','town','third')) not valid;
+exception when duplicate_object then null; end $$;
 
 create table if not exists abilities (
   id uuid primary key default gen_random_uuid(),
@@ -176,7 +184,8 @@ as $$
       from games g where g.id = p_game_id),
     'players', coalesce((select json_agg(json_build_object(
         'id', p.id, 'display_name', p.display_name,
-        'channel_name', p.channel_name, 'aliases', p.aliases) order by p.display_name)
+        'channel_name', p.channel_name, 'aliases', p.aliases,
+        'alignment', p.alignment) order by p.display_name)
       from players p where p.game_id = p_game_id), '[]'::json),
     'nights', coalesce((select json_agg(json_build_object(
         'night_number', n.night_number, 'started_at', n.started_at,
@@ -290,9 +299,14 @@ $$;
 grant execute on function game_data(uuid, text) to anon, authenticated;
 
 -- players -------------------------------------------------------------------
+-- Older versions had no p_alignment argument; drop that signature so the new
+-- one below isn't created as a second overload (which would make PostgREST
+-- calls ambiguous).
+drop function if exists upsert_player(uuid, text, uuid, text, text, text[]);
 create or replace function upsert_player(
   p_game_id uuid, p_pin text, p_player_id uuid,
-  p_display_name text, p_channel_name text, p_aliases text[])
+  p_display_name text, p_channel_name text, p_aliases text[],
+  p_alignment text default null)
 returns uuid
 language plpgsql security definer set search_path = public, extensions, pg_temp
 as $$
@@ -300,19 +314,21 @@ declare v_id uuid;
 begin
   perform assert_game_pin(p_game_id, p_pin);
   if p_player_id is null then
-    insert into players (game_id, display_name, channel_name, aliases)
-    values (p_game_id, p_display_name, nullif(trim(p_channel_name), ''), coalesce(p_aliases, '{}'))
+    insert into players (game_id, display_name, channel_name, aliases, alignment)
+    values (p_game_id, p_display_name, nullif(trim(p_channel_name), ''),
+      coalesce(p_aliases, '{}'), nullif(p_alignment, ''))
     returning id into v_id;
   else
     update players set display_name = p_display_name,
-      channel_name = nullif(trim(p_channel_name), ''), aliases = coalesce(p_aliases, '{}')
+      channel_name = nullif(trim(p_channel_name), ''), aliases = coalesce(p_aliases, '{}'),
+      alignment = nullif(p_alignment, '')
     where id = p_player_id and game_id = p_game_id
     returning id into v_id;
   end if;
   return v_id;
 end;
 $$;
-grant execute on function upsert_player(uuid, text, uuid, text, text, text[]) to anon, authenticated;
+grant execute on function upsert_player(uuid, text, uuid, text, text, text[], text) to anon, authenticated;
 
 create or replace function delete_player(p_game_id uuid, p_pin text, p_player_id uuid)
 returns void

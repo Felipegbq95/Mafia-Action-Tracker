@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
-import { parseMessage, isRecordableAction } from './parser.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713';
+import { parseMessage, isRecordableAction } from './parser.js?v=20260713';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -26,6 +26,37 @@ const playerColor = (playerId) => {
   const i = players().findIndex((p) => p.id === playerId);
   return i < 0 ? '#3a3e5c' : hueColor(i, 60, 66);
 };
+
+// Alignment coloring. When the host tags players with a faction, the board
+// colors nodes and arrows by the ACTOR's alignment instead of by ability:
+// mafia = tints of red/purple, town = tints of green/blue, third party =
+// yellow. Players sharing an alignment get spread across their family's hue
+// range so they stay individually distinguishable.
+const ALIGN_LABEL = { mafia: 'Mafia', town: 'Town', third: '3rd party' };
+const ALIGN_ORDER = ['mafia', 'town', 'third'];
+const ALIGN_HUE = { mafia: [353, 288], town: [140, 205], third: [54, 44] };
+const alignmentOn = () => players().some((p) => p.alignment);
+function alignmentColor(playerId) {
+  const p = players().find((x) => x.id === playerId);
+  const range = p?.alignment && ALIGN_HUE[p.alignment];
+  if (!range) return null;
+  const group = players().filter((x) => x.alignment === p.alignment);
+  const idx = Math.max(0, group.findIndex((x) => x.id === playerId));
+  const t = group.length > 1 ? idx / (group.length - 1) : 0.5;
+  const hue = Math.round(range[0] + (range[1] - range[0]) * t);
+  return `hsl(${hue} 68% 62%)`;
+}
+const alignKeyColor = (al) => `hsl(${Math.round((ALIGN_HUE[al][0] + ALIGN_HUE[al][1]) / 2)} 68% 62%)`;
+// Node color: alignment when tagged, else the per-player hue.
+const nodeColor = (playerId) => (alignmentOn()
+  ? (alignmentColor(playerId) ?? '#3a3e5c') : playerColor(playerId));
+// Arrow color: the actor's alignment when tagging is in use, else the ability
+// hue (so the ability legend stays meaningful when no alignments are set).
+const edgeColor = (a) => (alignmentOn()
+  ? (alignmentColor(a.actor_player_id) ?? UNRESOLVED_COLOR) : abilityColor(a.ability_id));
+// A blocked/redirected action gets an X on its arrow. Opt-in on the host's
+// result text so it stays zero-noise until a result is actually recorded.
+const isBlockedResult = (a) => /block|redirect/i.test(a.result ?? '');
 
 if (SUPABASE_URL.includes('YOUR-PROJECT') || SUPABASE_ANON_KEY.includes('YOUR-ANON-KEY')) {
   $('status').textContent = 'Not configured - set dashboard/config.js.';
@@ -321,7 +352,7 @@ function drawGraph() {
 
   const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'graph' });
   const defs = svgEl('defs');
-  const colors = new Set(drawable.map((a) => abilityColor(a.ability_id)));
+  const colors = new Set(drawable.map((a) => edgeColor(a)));
   for (const c of colors) {
     const m = svgEl('marker', { id: `mk-${c.replace(/[^a-z0-9]/gi, '')}`, viewBox: '0 0 10 10', refX: '9', refY: '5',
       markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });
@@ -330,10 +361,11 @@ function drawGraph() {
   }
   svg.appendChild(defs);
 
+  const overlays = []; // X marks for blocked/redirected arrows, drawn atop edges
   for (const a of drawable) {
     const s = pts[idIndex.get(a.actor_player_id)], t = pts[idIndex.get(a.target_player_id)];
     if (s === t) continue;
-    const c = abilityColor(a.ability_id);
+    const c = edgeColor(a);
     const dimmed = !inFilter(a)
       || (hover && !(a.actor_player_id === hover || a.target_player_id === hover));
     const dx = t.x - s.x, dy = t.y - s.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
@@ -355,6 +387,23 @@ function drawGraph() {
     });
     hit.addEventListener('click', () => { state.selectedActionId = a.id; render(); });
     svg.appendChild(hit);
+    if (isBlockedResult(a)) {
+      // midpoint of the quadratic curve (t = 0.5)
+      const bx = 0.25 * sx + 0.5 * kx + 0.25 * ex;
+      const by = 0.25 * sy + 0.5 * ky + 0.25 * ey;
+      overlays.push({ bx, by, c, dimmed });
+    }
+  }
+  for (const { bx, by, c, dimmed } of overlays) {
+    const xg = svgEl('g', { 'pointer-events': 'none', opacity: dimmed ? 0.2 : 1 });
+    xg.appendChild(svgEl('circle', { cx: bx, cy: by, r: 10,
+      fill: 'rgba(10,12,22,0.92)', stroke: c, 'stroke-width': 1.5 }));
+    for (const dir of [[1, 1], [1, -1]]) {
+      xg.appendChild(svgEl('line', { x1: bx - 6 * dir[0], y1: by - 6 * dir[1],
+        x2: bx + 6 * dir[0], y2: by + 6 * dir[1],
+        stroke: '#ff6b6b', 'stroke-width': 2.8, 'stroke-linecap': 'round' }));
+    }
+    svg.appendChild(xg);
   }
 
   roster.forEach((p, i) => {
@@ -363,7 +412,7 @@ function drawGraph() {
     const dimmed = (filterOn && !touched.has(p.id)) || (hover && !incident.has(p.id));
     const g = svgEl('g', { style: 'cursor:pointer', 'data-player': p.id });
     g.appendChild(svgEl('circle', { cx: pt.x, cy: pt.y, r: nodeR,
-      fill: playerColor(p.id),
+      fill: nodeColor(p.id),
       'fill-opacity': acted ? 1 : 0.35,
       stroke: state.hoverPlayerId === p.id ? '#ffffff' : 'rgba(255,255,255,0.25)',
       'stroke-width': state.hoverPlayerId === p.id ? 3 : 1.5, opacity: dimmed ? 0.3 : 1 }));
@@ -430,6 +479,7 @@ function renderLegend() {
   const ids = [...new Set(nightActions().filter((a) => a.actor_player_id && a.target_player_id)
     .map((a) => a.ability_id))];
   const box = h('div', { class: 'graph-legend' });
+  if (ids.length) box.appendChild(h('div', { class: 'leg-head' }, 'Abilities · click to isolate'));
   for (const id of ids) {
     const key = id ?? '';
     const active = state.abilitySel.has(key);
@@ -447,6 +497,18 @@ function renderLegend() {
   if (state.abilitySel.size > 0) {
     box.appendChild(h('div', { class: 'leg clear',
       onclick: () => { state.abilitySel = new Set(); render(); } }, 'Clear selection'));
+  }
+  // Alignment key: when players are tagged with a faction, nodes and arrows are
+  // colored by the actor's alignment, so show what the color families mean.
+  if (alignmentOn()) {
+    const present = ALIGN_ORDER.filter((al) => players().some((p) => p.alignment === al));
+    box.appendChild(h('div', { class: 'leg-divider' }));
+    box.appendChild(h('div', { class: 'leg-head' }, 'Colored by alignment'));
+    for (const al of present) {
+      box.appendChild(h('div', {},
+        h('span', { class: 'sw sw-dot', style: `background:${alignKeyColor(al)}` }),
+        ALIGN_LABEL[al]));
+    }
   }
   return box;
 }
@@ -714,6 +776,7 @@ async function addPlayersBulk(text) {
       await rpc('upsert_player', {
         p_game_id: state.gameId, p_pin: state.pin, p_player_id: null,
         p_display_name: name, p_channel_name: null, p_aliases: parts.slice(1),
+        p_alignment: null,
       });
     }
     await refresh(); state.error = '';
@@ -735,7 +798,7 @@ function renderPlayersEditor() {
 
   wrap.appendChild(h('button', { class: 'primary', onclick: () => mutate(() => rpc('upsert_player', {
     p_game_id: state.gameId, p_pin: state.pin, p_player_id: null,
-    p_display_name: 'New player', p_channel_name: null, p_aliases: [],
+    p_display_name: 'New player', p_channel_name: null, p_aliases: [], p_alignment: null,
   })) }, '+ Add player'));
   for (const p of players()) {
     const save = (patch) => mutate(() => rpc('upsert_player', {
@@ -743,6 +806,7 @@ function renderPlayersEditor() {
       p_display_name: patch.name ?? p.display_name,
       p_channel_name: patch.channel ?? p.channel_name,
       p_aliases: patch.aliases ?? p.aliases,
+      p_alignment: 'alignment' in patch ? patch.alignment : (p.alignment ?? null),
     }));
     const name = h('input', { value: p.display_name });
     name.addEventListener('change', () => save({ name: name.value }));
@@ -750,8 +814,11 @@ function renderPlayersEditor() {
     chan.addEventListener('change', () => save({ channel: chan.value }));
     const aliases = h('input', { value: (p.aliases ?? []).join(', '), placeholder: 'aliases, comma-separated' });
     aliases.addEventListener('change', () => save({ aliases: aliases.value.split(',').map((s) => s.trim()).filter(Boolean) }));
+    const align = selectEl(ALIGN_ORDER.map((a) => ({ value: a, label: ALIGN_LABEL[a] })),
+      p.alignment, (v) => save({ alignment: v || null }), { placeholder: 'no alignment' });
     wrap.appendChild(h('div', { class: 'editor row' },
       field('Name', name), field('Channel', chan), field('Aliases', aliases),
+      field('Alignment', align),
       h('button', { class: 'ghost danger small', onclick: () => mutate(() =>
         rpc('delete_player', { p_game_id: state.gameId, p_pin: state.pin, p_player_id: p.id })) }, 'Delete')));
   }
