@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713e';
-import { parseMessage, isRecordableAction } from './parser.js?v=20260713e';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713f';
+import { parseMessage, isRecordableAction } from './parser.js?v=20260713f';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';

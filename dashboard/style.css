@@ -131,7 +131,10 @@ textarea { background: var(--panel-raised); border: 1px solid var(--border); bor
 .night-row b { padding-bottom: 9px; }
 
 /* bigger board */
-main, .page-header { max-width: 1480px; }
+/* +236px (legend's 220px width + 16px gap) so the legend panel sits beside
+   the board without shrinking it - the graph keeps the same rendered size
+   it had when the legend floated on top of it instead of beside it. */
+main, .page-header { max-width: 1716px; }
 .details { max-height: 1000px; }
 
 /* clickable legend (ability multi-select) */
