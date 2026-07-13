@@ -75,15 +75,21 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .graph-legend { position: absolute; top: 14px; left: 16px; display: flex; flex-direction: column; gap: 6px;
   background: rgba(10,12,22,0.5); padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
 .graph-legend div { display: flex; align-items: center; gap: 7px; font-size: 0.85rem; color: var(--text-dim); }
-.graph-legend .sw { width: 14px; height: 3px; border-radius: 2px; }
+/* color swatches: a thin bar (.sw, ability legend) or a dot (.sw-dot, used
+   anywhere a player/alignment color needs a marker - legend, sheet rows). */
+.sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; flex: none; }
+.sw-dot { width: 11px; height: 11px; border-radius: 50%; }
 .details { width: 300px; flex: none; background: var(--panel); border: 1px solid var(--border);
   border-radius: 18px; padding: 16px 18px; max-height: 640px; overflow-y: auto; }
 .details-hint { color: var(--text-dim); font-size: 0.85rem; }
 .detail-raw { color: var(--text-dim); margin-bottom: 10px; word-break: break-word; }
-.mini-action { display: flex; justify-content: space-between; gap: 8px; align-items: center;
+.mini-action { display: flex; flex-direction: column; gap: 6px;
   background: var(--panel-raised); border: 1px solid var(--border); border-radius: 8px;
-  padding: 7px 10px; margin-bottom: 6px; cursor: pointer; }
-.mini-action .chan { color: var(--text-dim); font-size: 0.72rem; }
+  padding: 7px 10px; margin-bottom: 6px; }
+.mini-action .mini-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.mini-action .chan { color: var(--text-dim); font-size: 0.72rem; flex: none; }
+.mini-action .mini-text { flex: 1; min-width: 0; overflow-wrap: anywhere; cursor: pointer; }
+.mini-action .mini-assign { width: 100%; }
 .splash { background: var(--panel-raised); border: 1px solid var(--border); border-radius: 8px;
   padding: 8px 10px; margin-bottom: 8px; }
 .splash-head { font-size: 0.82rem; margin-bottom: 4px; }
@@ -133,7 +139,6 @@ main, .page-header { max-width: 1480px; }
 .graph-legend .leg-divider { height: 1px; background: var(--border); margin: 6px 0 2px; }
 .graph-legend .leg-head { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--text-dim); }
-.graph-legend .sw-dot { width: 11px; height: 11px; border-radius: 50%; }
 
 /* sheet tab (spreadsheet view) */
 .sheet-table { width: 100%; border-collapse: collapse; background: var(--panel);
@@ -143,6 +148,7 @@ main, .page-header { max-width: 1480px; }
 .sheet-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 0.86rem; }
 .sheet-table tr:last-child td { border-bottom: none; }
 .sheet-actor { font-weight: 600; white-space: nowrap; }
+.sheet-actor .sw-dot, .sheet-group .sw-dot { margin-right: 8px; vertical-align: middle; }
 .sheet-cell { min-width: 160px; }
 .sheet-line { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .sheet-line select { min-width: 130px; }

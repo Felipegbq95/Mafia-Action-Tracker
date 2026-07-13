@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713b';
-import { parseMessage, isRecordableAction } from './parser.js?v=20260713b';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713d';
+import { parseMessage, isRecordableAction } from './parser.js?v=20260713d';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -36,7 +36,13 @@ const ALIGN_LABEL = { mafia: 'Mafia', town: 'Town', third: '3rd party' };
 const ALIGN_ORDER = ['mafia', 'town', 'third'];
 // Sheet tab grouping order: town first, then mafia, then 3rd party.
 const SHEET_ALIGN_ORDER = ['town', 'mafia', 'third'];
-const ALIGN_HUE = { mafia: [353, 288], town: [140, 205], third: [54, 44] };
+const ALIGN_HUE = { mafia: [357, 272], town: [96, 218], third: [34, 66] };
+// Lightness/saturation alternate across each family alongside hue, so
+// neighbors stay visually distinct even where the hue step alone is small -
+// this matters most for 3rd party, whose whole family has to stay "yellow"
+// and so can't spread hue very far without drifting into orange/green.
+const ALIGN_LIG = [64, 46, 74, 38];
+const ALIGN_SAT = [75, 55, 88, 62];
 const alignmentOn = () => players().some((p) => p.alignment);
 function alignmentColor(playerId) {
   const p = players().find((x) => x.id === playerId);
@@ -46,9 +52,11 @@ function alignmentColor(playerId) {
   const idx = Math.max(0, group.findIndex((x) => x.id === playerId));
   const t = group.length > 1 ? idx / (group.length - 1) : 0.5;
   const hue = Math.round(range[0] + (range[1] - range[0]) * t);
-  return `hsl(${hue} 68% 62%)`;
+  const lig = ALIGN_LIG[idx % ALIGN_LIG.length];
+  const sat = ALIGN_SAT[idx % ALIGN_SAT.length];
+  return `hsl(${hue} ${sat}% ${lig}%)`;
 }
-const alignKeyColor = (al) => `hsl(${Math.round((ALIGN_HUE[al][0] + ALIGN_HUE[al][1]) / 2)} 68% 62%)`;
+const alignKeyColor = (al) => `hsl(${Math.round((ALIGN_HUE[al][0] + ALIGN_HUE[al][1]) / 2)} 72% 62%)`;
 // Node color: alignment when tagged, else the per-player hue.
 const nodeColor = (playerId) => (alignmentOn()
   ? (alignmentColor(playerId) ?? '#3a3e5c') : playerColor(playerId));
@@ -524,6 +532,19 @@ function effectLabel(a) {
   return a.effect_text || a.ability_name || (a.ability_raw ? `${a.ability_raw} (unresolved)` : '?');
 }
 
+// A group-chat message that carries several actions (the mafia channel
+// posting the whole faction's night at once) gets split into one row per
+// action, but every row's `raw_text` column is intentionally the FULL
+// original message - that's what lets re-match/split re-derive all the
+// siblings later. Shown to the host as-is, that means every split-off action
+// displays the same giant multi-line blob instead of just its own line. This
+// re-parses raw_text and picks out only this row's own span for display.
+function spanRawText(a) {
+  if (!a.raw_text) return a.raw_text;
+  const spans = parseMessage(a.raw_text, players(), abilities()).filter(isRecordableAction);
+  return spans[a.span_index ?? 0]?.raw ?? a.raw_text;
+}
+
 function renderPlayerDetails(pid) {
   const box = h('div', {});
   box.appendChild(h('h3', {}, playerName(pid) ?? 'Player'));
@@ -561,9 +582,20 @@ function renderSide() {
       h('h3', {}, `Needs an actor (${unassigned.length})`),
       rematchButton()));
     for (const a of unassigned) {
-      side.appendChild(h('div', { class: 'mini-action', onclick: () => { state.selectedActionId = a.id; render(); } },
-        h('span', { class: 'mono' }, a.raw_text || `${a.ability_name ?? '?'} -> ${a.target_name ?? a.target_raw ?? '?'}`),
-        a.source_channel ? h('span', { class: 'chan' }, `#${a.source_channel}`) : null));
+      const assign = selectEl(players().map((p) => ({ value: p.id, label: p.display_name })), null,
+        (v) => mutate(() => rpc('upsert_action', {
+          p_game_id: state.gameId, p_pin: state.pin, p_action_id: a.id, p_night_number: a.night_number,
+          p_actor_player_id: v || null, p_ability_id: a.ability_id, p_target_player_id: a.target_player_id,
+          p_result: a.result, p_raw_text: a.raw_text, p_needs_review: !(v && a.ability_id && a.target_player_id),
+        })), { placeholder: 'assign actor' });
+      assign.className = 'mini-assign';
+      assign.addEventListener('click', (e) => e.stopPropagation());
+      side.appendChild(h('div', { class: 'mini-action' },
+        h('div', { class: 'mini-top' },
+          h('span', { class: 'mono mini-text', onclick: () => { state.selectedActionId = a.id; render(); } },
+            spanRawText(a) || `${a.ability_name ?? '?'} -> ${a.target_name ?? a.target_raw ?? '?'}`),
+          a.source_channel ? h('span', { class: 'chan' }, `#${a.source_channel}`) : null),
+        assign));
     }
   }
   // splashes for this night's targets
@@ -697,7 +729,7 @@ function actionEditor(a, withClose) {
   if (withClose) box.appendChild(h('div', { class: 'editor-head' },
     h('h3', {}, 'Edit action'),
     h('button', { class: 'ghost small', onclick: () => { state.selectedActionId = null; render(); } }, 'Close')));
-  if (a.raw_text) box.appendChild(h('div', { class: 'detail-raw mono' }, a.raw_text));
+  if (a.raw_text) box.appendChild(h('div', { class: 'detail-raw mono' }, spanRawText(a)));
 
   const playerOpts = players().map((p) => ({ value: p.id, label: p.display_name }));
   const abilityOpts = abilities().map((ab) => ({ value: ab.id, label: ab.name }));
