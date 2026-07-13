@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713';
-import { parseMessage, isRecordableAction } from './parser.js?v=20260713';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713b';
+import { parseMessage, isRecordableAction } from './parser.js?v=20260713b';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -34,6 +34,8 @@ const playerColor = (playerId) => {
 // range so they stay individually distinguishable.
 const ALIGN_LABEL = { mafia: 'Mafia', town: 'Town', third: '3rd party' };
 const ALIGN_ORDER = ['mafia', 'town', 'third'];
+// Sheet tab grouping order: town first, then mafia, then 3rd party.
+const SHEET_ALIGN_ORDER = ['town', 'mafia', 'third'];
 const ALIGN_HUE = { mafia: [353, 288], town: [140, 205], third: [54, 44] };
 const alignmentOn = () => players().some((p) => p.alignment);
 function alignmentColor(playerId) {
@@ -150,6 +152,9 @@ function nightNumbers() {
 }
 const nights = () => state.data?.nights ?? [];
 const playerName = (id) => players().find((p) => p.id === id)?.display_name;
+const nightNotes = () => state.data?.night_notes ?? [];
+const nightNoteFor = (playerId) =>
+  nightNotes().find((n) => n.night_number === state.night && n.player_id === playerId)?.note ?? '';
 
 // ---- render root ----------------------------------------------------------
 function render() {
@@ -219,17 +224,19 @@ function renderGame() {
         .then(() => { state.night = Math.max(...nightNumbers()) + 1; })) }, '+'));
   }
 
-  const tabs = state.readOnly ? ['board'] : ['board', 'actions', 'players', 'abilities', 'settings'];
+  const tabs = state.readOnly
+    ? ['board', 'sheet']
+    : ['board', 'sheet', 'actions', 'players', 'abilities', 'settings'];
   if (!tabs.includes(state.tab)) state.tab = 'board';
   const nav = $('tabs'); nav.innerHTML = '';
   for (const t of tabs) {
     nav.appendChild(h('button', { class: 'tab' + (state.tab === t ? ' active' : ''),
       onclick: () => { state.tab = t; render(); } }, t[0].toUpperCase() + t.slice(1)));
   }
-  if (state.readOnly) state.tab = 'board';
 
   const panel = $('panel'); panel.innerHTML = '';
   if (state.tab === 'board') panel.appendChild(renderBoard());
+  else if (state.tab === 'sheet') panel.appendChild(renderSheet());
   else if (state.tab === 'actions') panel.appendChild(renderActionsEditor());
   else if (state.tab === 'players') panel.appendChild(renderPlayersEditor());
   else if (state.tab === 'abilities') panel.appendChild(renderAbilitiesEditor());
@@ -746,6 +753,110 @@ function actionEditor(a, withClose) {
 }
 function field(label, control) {
   return h('label', { class: 'field' }, h('span', { class: 'field-label' }, label), control);
+}
+
+// ---- sheet tab (spreadsheet view) ------------------------------------------
+// One row per player for the selected night: what they did, who they hit,
+// who hit them, and a free-text "night results" note. Grouped by alignment
+// (town, then mafia, then 3rd party, unaligned players last) and alphabetical
+// within each group. The Action/Target cells are directly editable (they
+// write back to the same `actions` rows as the Board/Actions tab); "Targeted
+// by" and its ability are derived from other players' actions, so they're
+// read-only here - click one to jump to that actor's own row.
+function renderSheet() {
+  const editable = !state.readOnly;
+  const wrap = h('div', { class: 'stack' });
+  const table = h('table', { class: 'sheet-table' });
+  table.appendChild(h('thead', {}, h('tr', {},
+    h('th', {}, 'Actor'), h('th', {}, 'Action'), h('th', {}, 'Target'),
+    h('th', {}, 'Targeted by'), h('th', {}, 'Action that targeted them'), h('th', {}, 'Night results'))));
+  const tbody = h('tbody', {});
+  const groups = [...SHEET_ALIGN_ORDER, null]; // null = unaligned, shown last
+  for (const al of groups) {
+    const group = players()
+      .filter((p) => (al === null ? !p.alignment : p.alignment === al))
+      .sort((a, b) => a.display_name.localeCompare(b.display_name));
+    if (!group.length) continue;
+    const swatch = al ? alignKeyColor(al) : '#5a5f7c';
+    tbody.appendChild(h('tr', { class: 'sheet-group' },
+      h('td', { colspan: '6' },
+        h('span', { class: 'sw sw-dot', style: `background:${swatch}` }), al ? ALIGN_LABEL[al] : 'Unaligned')));
+    for (const p of group) tbody.appendChild(sheetRow(p, editable));
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  if (!players().length) wrap.appendChild(h('p', { class: 'muted' }, 'No players yet - add some in the Players tab.'));
+  return wrap;
+}
+
+function sheetRow(p, editable) {
+  const outgoing = nightActions().filter((a) => a.actor_player_id === p.id);
+  const incoming = nightActions().filter((a) => a.target_player_id === p.id);
+  const playerOpts = players().map((x) => ({ value: x.id, label: x.display_name }));
+  // Option labels favor the ability's EFFECT over its raw name, same as the
+  // board's tooltips - "action", not "ability name".
+  const abilityOpts = abilities().map((ab) => ({ value: ab.id, label: ab.effect_text || ab.name }));
+
+  const actionCell = h('td', { class: 'sheet-cell' });
+  const targetCell = h('td', { class: 'sheet-cell' });
+  for (const a of outgoing) {
+    const save = (patch) => mutate(() => rpc('upsert_action', {
+      p_game_id: state.gameId, p_pin: state.pin, p_action_id: a.id,
+      p_night_number: a.night_number, p_actor_player_id: a.actor_player_id,
+      p_ability_id: patch.ability ?? a.ability_id, p_target_player_id: patch.target ?? a.target_player_id,
+      p_result: a.result, p_raw_text: a.raw_text, p_needs_review: false,
+    }));
+    actionCell.appendChild(h('div', { class: 'sheet-line' },
+      selectEl(abilityOpts, a.ability_id, (v) => save({ ability: v || null }), { placeholder: 'unresolved', disabled: editable ? null : true }),
+      editable ? h('button', { class: 'ghost small sheet-x', title: 'Delete this action', onclick: () => mutate(() =>
+        rpc('delete_action', { p_game_id: state.gameId, p_pin: state.pin, p_action_id: a.id })) }, '×') : null));
+    targetCell.appendChild(h('div', { class: 'sheet-line' },
+      selectEl(playerOpts, a.target_player_id, (v) => save({ target: v || null }), { placeholder: 'unresolved', disabled: editable ? null : true })));
+  }
+  if (!outgoing.length) {
+    actionCell.appendChild(h('span', { class: 'muted small' }, '-'));
+    targetCell.appendChild(h('span', { class: 'muted small' }, '-'));
+  }
+  if (editable) {
+    actionCell.appendChild(h('button', { class: 'ghost small', onclick: () => mutate(() => rpc('upsert_action', {
+      p_game_id: state.gameId, p_pin: state.pin, p_action_id: null, p_night_number: state.night,
+      p_actor_player_id: p.id, p_ability_id: null, p_target_player_id: null,
+      p_result: null, p_raw_text: null, p_needs_review: true,
+    })) }, '+ action'));
+  }
+
+  const byCell = h('td', { class: 'sheet-cell' });
+  const abilityInCell = h('td', { class: 'sheet-cell' });
+  if (!incoming.length) {
+    byCell.appendChild(h('span', { class: 'muted small' }, '-'));
+    abilityInCell.appendChild(h('span', { class: 'muted small' }, '-'));
+  }
+  for (const a of incoming) {
+    const who = a.actor_name ?? a.actor_raw ?? 'unassigned';
+    byCell.appendChild(h('div', { class: 'sheet-line sheet-readonly', onclick: () => jumpToSheetRow(a.actor_player_id) }, who));
+    abilityInCell.appendChild(h('div', { class: 'sheet-line sheet-readonly', onclick: () => jumpToSheetRow(a.actor_player_id) }, effectLabel(a)));
+  }
+
+  const resultCell = h('td', { class: 'sheet-cell' });
+  const note = h('input', { value: nightNoteFor(p.id), placeholder: editable ? 'e.g. survived the night' : '', disabled: editable ? null : true });
+  note.addEventListener('change', () => mutate(() => rpc('upsert_night_note', {
+    p_game_id: state.gameId, p_pin: state.pin, p_night: state.night, p_player_id: p.id, p_note: note.value || null,
+  })));
+  resultCell.appendChild(note);
+
+  const nameCell = h('td', { class: 'sheet-actor' },
+    h('span', { class: 'sw sw-dot', style: `background:${nodeColor(p.id)}` }), p.display_name);
+
+  return h('tr', { id: `sheet-row-${p.id}` }, nameCell, actionCell, targetCell, byCell, abilityInCell, resultCell);
+}
+
+function jumpToSheetRow(playerId) {
+  if (!playerId) return;
+  const el = document.getElementById(`sheet-row-${playerId}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.classList.add('sheet-flash');
+  setTimeout(() => el.classList.remove('sheet-flash'), 900);
 }
 
 // ---- actions tab ----------------------------------------------------------

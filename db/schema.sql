@@ -89,6 +89,18 @@ create table if not exists nights (
   primary key (game_id, night_number)
 );
 
+-- Free-text per-player, per-night summary, edited in the dashboard's Sheet
+-- tab ("Night results" column). Deliberately not tied to any single action's
+-- `result` - a player's night can be shaped by several actions (their own +
+-- whoever targeted them), so this is a separate host-written note.
+create table if not exists night_notes (
+  game_id uuid not null references games(id) on delete cascade,
+  night_number int not null,
+  player_id uuid not null references players(id) on delete cascade,
+  note text,
+  primary key (game_id, night_number, player_id)
+);
+
 create table if not exists actions (
   id uuid primary key default gen_random_uuid(),
   game_id uuid not null references games(id) on delete cascade,
@@ -139,6 +151,7 @@ alter table players enable row level security;
 alter table abilities enable row level security;
 alter table actions enable row level security;
 alter table nights enable row level security;
+alter table night_notes enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
@@ -191,6 +204,9 @@ as $$
         'night_number', n.night_number, 'started_at', n.started_at,
         'ends_at', n.ends_at) order by n.night_number)
       from nights n where n.game_id = p_game_id), '[]'::json),
+    'night_notes', coalesce((select json_agg(json_build_object(
+        'night_number', nn.night_number, 'player_id', nn.player_id, 'note', nn.note))
+      from night_notes nn where nn.game_id = p_game_id), '[]'::json),
     'abilities', coalesce((select json_agg(json_build_object(
         'id', a.id, 'name', a.name, 'aliases', a.aliases, 'effect_text', a.effect_text,
         'computable_type', a.computable_type, 'splash_text', a.splash_text) order by a.name)
@@ -485,6 +501,22 @@ begin
 end;
 $$;
 grant execute on function upsert_night(uuid, text, int, timestamptz, timestamptz) to anon, authenticated;
+
+-- Per-player, per-night free-text note (Sheet tab's "Night results" column).
+create or replace function upsert_night_note(
+  p_game_id uuid, p_pin text, p_night int, p_player_id uuid, p_note text)
+returns void
+language plpgsql security definer set search_path = public, extensions, pg_temp
+as $$
+begin
+  perform assert_game_pin(p_game_id, p_pin);
+  insert into night_notes (game_id, night_number, player_id, note)
+  values (p_game_id, greatest(1, p_night), p_player_id, nullif(p_note, ''))
+  on conflict (game_id, night_number, player_id)
+  do update set note = excluded.note;
+end;
+$$;
+grant execute on function upsert_night_note(uuid, text, int, uuid, text) to anon, authenticated;
 
 -- Finish a game: remove the PIN and lock editing; becomes public read-only.
 create or replace function archive_game(p_game_id uuid, p_pin text)
