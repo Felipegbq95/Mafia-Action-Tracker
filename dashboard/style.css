@@ -72,8 +72,11 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   border: 1px solid var(--border); border-radius: 18px; }
 .graph { width: 100%; height: auto; display: block; }
 .node-label { fill: var(--text); font-size: 18px; font-weight: 600; font-family: system-ui, sans-serif; }
-.graph-legend { position: absolute; top: 14px; left: 16px; display: flex; flex-direction: column; gap: 6px;
-  background: rgba(10,12,22,0.5); padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+/* Its own panel to the left of the board (like the details panel on the
+   right), not overlaid on top of the graph. */
+.graph-legend { width: 220px; flex: none; display: flex; flex-direction: column; gap: 6px;
+  background: var(--panel); padding: 16px 18px; border: 1px solid var(--border); border-radius: 18px;
+  max-height: 640px; overflow-y: auto; }
 .graph-legend div { display: flex; align-items: center; gap: 7px; font-size: 0.85rem; color: var(--text-dim); }
 /* color swatches: a thin bar (.sw, ability legend) or a dot (.sw-dot, used
    anywhere a player/alignment color needs a marker - legend, sheet rows). */
@@ -157,6 +160,10 @@ main, .page-header { max-width: 1480px; }
 .sheet-x { padding: 2px 7px; line-height: 1; color: var(--accent); }
 .sheet-group td { background: var(--panel-raised); font-weight: 600; font-size: 0.78rem;
   text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; }
+/* "+ action" lives in its own slim column at the end of the row instead of
+   stacked inside the Action cell, so it doesn't widen/crowd that column. */
+.sheet-add-col { width: 1%; min-width: 0; text-align: center; white-space: nowrap; }
+.sheet-add-col button { padding: 4px 10px; }
 .sheet-flash { animation: sheet-flash 0.9s ease; }
 @keyframes sheet-flash { 0% { background: rgba(224,69,79,0.28); } 100% { background: transparent; } }
 @media (max-width: 900px) {

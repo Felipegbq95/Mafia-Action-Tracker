@@ -1,13 +1,16 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713d';
-import { parseMessage, isRecordableAction } from './parser.js?v=20260713d';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713e';
+import { parseMessage, isRecordableAction } from './parser.js?v=20260713e';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+// Auto-parsable computable types get a fixed color, used to color-code the
+// Sheet tab's Action/Target cells: kill = purple, roleblock = yellow, save =
+// green. Types with no agreed color stay neutral (no accent applied).
 const CT_COLOR = {
-  kill: '#e0454f', save: '#4caf7d', track: '#eab54e', watch: '#4fd0c0',
-  redirect: '#d98c5f', roleblock: '#4f9de0', none: '#6b6f8c',
+  kill: '#a855f7', save: '#4caf7d', track: '#6b6f8c', watch: '#6b6f8c',
+  redirect: '#6b6f8c', roleblock: '#eab308', none: '#6b6f8c',
 };
 const CT_LABEL = {
   kill: 'Kill', save: 'Save', track: 'Track', watch: 'Watch',
@@ -321,9 +324,9 @@ function renderNightWindows() {
 // ---- board (graph + side) -------------------------------------------------
 function renderBoard() {
   const wrap = h('div', { class: 'web-view' });
+  wrap.appendChild(renderLegend());
   const graphWrap = h('div', { class: 'graph-wrap' });
   graphWrap.appendChild(drawGraph());
-  graphWrap.appendChild(renderLegend());
   graphWrap.appendChild(h('div', { class: 'graph-tip' }));
   wrap.appendChild(graphWrap);
   wrap.appendChild(renderSide());
@@ -795,15 +798,25 @@ function field(label, control) {
 // write back to the same `actions` rows as the Board/Actions tab); "Targeted
 // by" and its ability are derived from other players' actions, so they're
 // read-only here - click one to jump to that actor's own row.
+// Computable types with an agreed color, used to color-code the Sheet tab's
+// Action/Target cells (both, so a roleblock's target - and its 2nd target,
+// if the ability fanned into several rows - both pick up the accent too).
+const CT_ACCENT_TYPES = new Set(['kill', 'save', 'roleblock']);
+const ctAccent = (a) => (CT_ACCENT_TYPES.has(a.computable_type) ? CT_COLOR[a.computable_type] : null);
+
 function renderSheet() {
   const editable = !state.readOnly;
   const wrap = h('div', { class: 'stack' });
   const table = h('table', { class: 'sheet-table' });
-  table.appendChild(h('thead', {}, h('tr', {},
+  const headCells = [
     h('th', {}, 'Actor'), h('th', {}, 'Action'), h('th', {}, 'Target'),
-    h('th', {}, 'Targeted by'), h('th', {}, 'Action that targeted them'), h('th', {}, 'Night results'))));
+    h('th', {}, 'Targeted by'), h('th', {}, 'Action that targeted them'), h('th', {}, 'Night results'),
+  ];
+  if (editable) headCells.push(h('th', { class: 'sheet-add-col' }, ''));
+  table.appendChild(h('thead', {}, h('tr', {}, ...headCells)));
   const tbody = h('tbody', {});
   const groups = [...SHEET_ALIGN_ORDER, null]; // null = unaligned, shown last
+  const colspan = editable ? '7' : '6';
   for (const al of groups) {
     const group = players()
       .filter((p) => (al === null ? !p.alignment : p.alignment === al))
@@ -811,7 +824,7 @@ function renderSheet() {
     if (!group.length) continue;
     const swatch = al ? alignKeyColor(al) : '#5a5f7c';
     tbody.appendChild(h('tr', { class: 'sheet-group' },
-      h('td', { colspan: '6' },
+      h('td', { colspan },
         h('span', { class: 'sw sw-dot', style: `background:${swatch}` }), al ? ALIGN_LABEL[al] : 'Unaligned')));
     for (const p of group) tbody.appendChild(sheetRow(p, editable));
   }
@@ -829,6 +842,10 @@ function sheetRow(p, editable) {
   // board's tooltips - "action", not "ability name".
   const abilityOpts = abilities().map((ab) => ({ value: ab.id, label: ab.effect_text || ab.name }));
 
+  const lineStyle = (a) => {
+    const accent = ctAccent(a);
+    return accent ? `border-left:3px solid ${accent}; padding-left:6px;` : '';
+  };
   const actionCell = h('td', { class: 'sheet-cell' });
   const targetCell = h('td', { class: 'sheet-cell' });
   for (const a of outgoing) {
@@ -838,23 +855,16 @@ function sheetRow(p, editable) {
       p_ability_id: patch.ability ?? a.ability_id, p_target_player_id: patch.target ?? a.target_player_id,
       p_result: a.result, p_raw_text: a.raw_text, p_needs_review: false,
     }));
-    actionCell.appendChild(h('div', { class: 'sheet-line' },
+    actionCell.appendChild(h('div', { class: 'sheet-line', style: lineStyle(a) },
       selectEl(abilityOpts, a.ability_id, (v) => save({ ability: v || null }), { placeholder: 'unresolved', disabled: editable ? null : true }),
       editable ? h('button', { class: 'ghost small sheet-x', title: 'Delete this action', onclick: () => mutate(() =>
         rpc('delete_action', { p_game_id: state.gameId, p_pin: state.pin, p_action_id: a.id })) }, '×') : null));
-    targetCell.appendChild(h('div', { class: 'sheet-line' },
+    targetCell.appendChild(h('div', { class: 'sheet-line', style: lineStyle(a) },
       selectEl(playerOpts, a.target_player_id, (v) => save({ target: v || null }), { placeholder: 'unresolved', disabled: editable ? null : true })));
   }
   if (!outgoing.length) {
     actionCell.appendChild(h('span', { class: 'muted small' }, '-'));
     targetCell.appendChild(h('span', { class: 'muted small' }, '-'));
-  }
-  if (editable) {
-    actionCell.appendChild(h('button', { class: 'ghost small', onclick: () => mutate(() => rpc('upsert_action', {
-      p_game_id: state.gameId, p_pin: state.pin, p_action_id: null, p_night_number: state.night,
-      p_actor_player_id: p.id, p_ability_id: null, p_target_player_id: null,
-      p_result: null, p_raw_text: null, p_needs_review: true,
-    })) }, '+ action'));
   }
 
   const byCell = h('td', { class: 'sheet-cell' });
@@ -865,8 +875,12 @@ function sheetRow(p, editable) {
   }
   for (const a of incoming) {
     const who = a.actor_name ?? a.actor_raw ?? 'unassigned';
-    byCell.appendChild(h('div', { class: 'sheet-line sheet-readonly', onclick: () => jumpToSheetRow(a.actor_player_id) }, who));
-    abilityInCell.appendChild(h('div', { class: 'sheet-line sheet-readonly', onclick: () => jumpToSheetRow(a.actor_player_id) }, effectLabel(a)));
+    const dot = a.actor_player_id
+      ? h('span', { class: 'sw sw-dot', style: `background:${nodeColor(a.actor_player_id)}` }) : null;
+    byCell.appendChild(h('div', { class: 'sheet-line sheet-readonly', onclick: () => jumpToSheetRow(a.actor_player_id) }, dot, who));
+    abilityInCell.appendChild(h('div',
+      { class: 'sheet-line sheet-readonly', style: lineStyle(a), onclick: () => jumpToSheetRow(a.actor_player_id) },
+      effectLabel(a)));
   }
 
   const resultCell = h('td', { class: 'sheet-cell' });
@@ -879,7 +893,16 @@ function sheetRow(p, editable) {
   const nameCell = h('td', { class: 'sheet-actor' },
     h('span', { class: 'sw sw-dot', style: `background:${nodeColor(p.id)}` }), p.display_name);
 
-  return h('tr', { id: `sheet-row-${p.id}` }, nameCell, actionCell, targetCell, byCell, abilityInCell, resultCell);
+  // "+ action" lives in its own slim column at the end of the row, not
+  // stacked inside the Action cell, so it doesn't widen/crowd that column.
+  const addCell = editable ? h('td', { class: 'sheet-add-col' },
+    h('button', { class: 'ghost small', title: 'Add an action for this player', onclick: () => mutate(() => rpc('upsert_action', {
+      p_game_id: state.gameId, p_pin: state.pin, p_action_id: null, p_night_number: state.night,
+      p_actor_player_id: p.id, p_ability_id: null, p_target_player_id: null,
+      p_result: null, p_raw_text: null, p_needs_review: true,
+    })) }, '+')) : null;
+
+  return h('tr', { id: `sheet-row-${p.id}` }, nameCell, actionCell, targetCell, byCell, abilityInCell, resultCell, addCell);
 }
 
 function jumpToSheetRow(playerId) {
