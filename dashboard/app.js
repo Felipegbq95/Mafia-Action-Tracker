@@ -1,16 +1,17 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713f';
-import { parseMessage, isRecordableAction } from './parser.js?v=20260713f';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713g';
+import { parseMessage, isRecordableAction } from './parser.js?v=20260713g';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // Auto-parsable computable types get a fixed color, used to color-code the
-// Sheet tab's Action/Target cells: kill = purple, roleblock = yellow, save =
+// Sheet tab's Action/Target cells: kill = purple, roleblock/redirect =
+// yellow (paired, like the board's roleblock-or-redirect X marker), save =
 // green. Types with no agreed color stay neutral (no accent applied).
 const CT_COLOR = {
   kill: '#a855f7', save: '#4caf7d', track: '#6b6f8c', watch: '#6b6f8c',
-  redirect: '#6b6f8c', roleblock: '#eab308', none: '#6b6f8c',
+  redirect: '#eab308', roleblock: '#eab308', none: '#6b6f8c',
 };
 const CT_LABEL = {
   kill: 'Kill', save: 'Save', track: 'Track', watch: 'Watch',
@@ -801,7 +802,7 @@ function field(label, control) {
 // Computable types with an agreed color, used to color-code the Sheet tab's
 // Action/Target cells (both, so a roleblock's target - and its 2nd target,
 // if the ability fanned into several rows - both pick up the accent too).
-const CT_ACCENT_TYPES = new Set(['kill', 'save', 'roleblock']);
+const CT_ACCENT_TYPES = new Set(['kill', 'save', 'roleblock', 'redirect']);
 const ctAccent = (a) => (CT_ACCENT_TYPES.has(a.computable_type) ? CT_COLOR[a.computable_type] : null);
 
 function renderSheet() {
