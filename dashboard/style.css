@@ -186,3 +186,9 @@ main, .page-header { max-width: 1716px; }
 .graph-tip .tip-effect { color: var(--text-dim); margin-bottom: 6px; }
 .graph-tip .tip-line { font-size: 0.82rem; }
 .graph-tip .tip-result { color: var(--warn); font-weight: 600; }
+
+/* votes tab - the vote counter runs in its own iframe (ported in unchanged),
+   so it needs no styling of its own beyond a sized, framed container. */
+.votes-frame-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; }
+.votes-frame { width: 100%; height: 900px; border: none; display: block; }

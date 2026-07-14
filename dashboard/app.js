@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713h';
-import { parseMessage, isRecordableAction } from './parser.js?v=20260713h';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713i';
+import { parseMessage, isRecordableAction } from './parser.js?v=20260713i';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -83,6 +83,9 @@ const state = {
   night: 1, tab: 'board', selectedActionId: null, hoverPlayerId: null, error: '',
   // legend multi-select: ability ids ('' = unresolved) isolated on the board
   abilitySel: new Set(),
+  // day-start timestamps posted up by the embedded vote counter (Votes tab),
+  // used to offer auto-filling night windows; see the message listener below.
+  dayStarts: [],
 };
 
 // ---- dom helpers ----------------------------------------------------------
@@ -134,13 +137,13 @@ async function refresh() {
 }
 async function openGame(gameId, pin) {
   state.gameId = gameId; state.pin = pin; state.readOnly = false;
-  state.abilitySel = new Set();
+  state.abilitySel = new Set(); state.dayStarts = [];
   $('scrape-status').hidden = true;
   await refresh(); render();
 }
 async function openPublic(gameId) {
   state.gameId = gameId; state.pin = null; state.readOnly = true;
-  state.abilitySel = new Set();
+  state.abilitySel = new Set(); state.dayStarts = [];
   $('scrape-status').hidden = true;
   await refresh(); render();
 }
@@ -237,8 +240,8 @@ function renderGame() {
   }
 
   const tabs = state.readOnly
-    ? ['board', 'sheet']
-    : ['board', 'sheet', 'actions', 'players', 'abilities', 'settings'];
+    ? ['board', 'sheet', 'votes']
+    : ['board', 'sheet', 'actions', 'players', 'abilities', 'votes', 'settings'];
   if (!tabs.includes(state.tab)) state.tab = 'board';
   const nav = $('tabs'); nav.innerHTML = '';
   for (const t of tabs) {
@@ -252,6 +255,7 @@ function renderGame() {
   else if (state.tab === 'actions') panel.appendChild(renderActionsEditor());
   else if (state.tab === 'players') panel.appendChild(renderPlayersEditor());
   else if (state.tab === 'abilities') panel.appendChild(renderAbilitiesEditor());
+  else if (state.tab === 'votes') { panel.appendChild(renderVotes()); updateVotesPreview(); }
   else if (state.tab === 'settings') panel.appendChild(renderSettings());
 }
 
@@ -320,6 +324,80 @@ function renderNightWindows() {
       h('button', { class: 'ghost small', onclick: save }, 'Save')));
   }
   return box;
+}
+
+// ---- votes tab --------------------------------------------------------------
+// The vote counter (dashboard/votes/) is a separate, self-contained, static
+// app - ported in unchanged and run in its own iframe rather than merged
+// into this file, so its behavior stays exactly what it was standalone (and
+// its own test suite keeps covering it). The one addition on its side is a
+// postMessage of the day-start timestamps it already detects from the
+// pasted forum print; this listens for that and offers to turn them into
+// night windows. Night N's window is [Day N's timestamp, Day N+1's
+// timestamp) - Discord's private night channels never see day-phase
+// content, so that span is safe to use even though it also covers day N's
+// daytime hours.
+function deriveNightWindows(dayStarts) {
+  const byDay = new Map();
+  for (const d of dayStarts ?? []) {
+    if (!byDay.has(d.day)) byDay.set(d.day, d); // keep the first occurrence
+  }
+  const days = [...byDay.values()].sort((a, b) => a.day - b.day);
+  const windows = [];
+  for (let i = 0; i < days.length; i += 1) {
+    const startMs = new Date(days[i].timestamp).getTime();
+    if (Number.isNaN(startMs)) continue; // unparseable timestamp - skip rather than guess
+    const next = days[i + 1];
+    const endMs = next ? new Date(next.timestamp).getTime() : null;
+    windows.push({
+      night_number: days[i].day,
+      started_at: new Date(startMs).toISOString(),
+      ends_at: endMs != null && !Number.isNaN(endMs) ? new Date(endMs).toISOString() : null,
+    });
+  }
+  return windows;
+}
+
+// The preview box is updated in place (see updateVotesPreview below) rather
+// than through the normal render() rebuild-everything pipeline, because the
+// vote counter posts an update on every "Count Votes" click - if that
+// triggered a full render(), it would recreate the iframe each time and
+// reload the vote counter out from under the host's pasted-in thread.
+function renderVotes() {
+  const wrap = h('div', { class: 'stack' });
+  wrap.appendChild(h('div', { class: 'votes-frame-wrap' },
+    h('iframe', { class: 'votes-frame', src: 'votes/index.html', title: 'Vote counter' })));
+  wrap.appendChild(h('div', { class: 'editor', id: 'votes-night-preview', hidden: true }));
+  return wrap;
+}
+
+function updateVotesPreview() {
+  const box = document.getElementById('votes-night-preview');
+  if (!box) return; // Votes tab isn't mounted right now
+  box.innerHTML = '';
+  const windows = deriveNightWindows(state.dayStarts);
+  if (!windows.length) { box.hidden = true; return; }
+  box.hidden = false;
+  box.appendChild(h('h3', {}, 'Night windows detected from the print'));
+  box.appendChild(h('p', { class: 'muted small' },
+    'From the "Day N Start" posts in what you pasted above (read in your browser\'s local '
+    + 'timezone). Saving overwrites any existing windows for these nights.'));
+  for (const w of windows) {
+    const start = new Date(w.started_at).toLocaleString();
+    const end = w.ends_at ? new Date(w.ends_at).toLocaleString() : 'ongoing';
+    box.appendChild(h('div', { class: 'detail-row' }, h('b', {}, `Night ${w.night_number}`), `: ${start} -> ${end}`));
+  }
+  if (!state.readOnly) {
+    box.appendChild(h('button', { class: 'primary', style: 'margin-top:10px', onclick: () => mutate(async () => {
+      for (const w of windows) {
+        await rpc('upsert_night', {
+          p_game_id: state.gameId, p_pin: state.pin, p_night: w.night_number,
+          p_started_at: w.started_at, p_ends_at: w.ends_at,
+        });
+      }
+      state.dayStarts = [];
+    }) }, `Save ${windows.length} night window${windows.length === 1 ? '' : 's'}`));
+  }
 }
 
 // ---- board (graph + side) -------------------------------------------------
@@ -1126,6 +1204,17 @@ $('scrape-btn').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
   }
+});
+
+// Vote counter (Votes tab) posts up the day-start timestamps it detects from
+// the pasted forum print, once per "Count Votes" click - updated in place
+// (not via the full render() pipeline) so the iframe itself is never
+// recreated/reloaded out from under the host's pasted-in thread.
+window.addEventListener('message', (e) => {
+  if (e.data?.source !== 'mafia-vote-parser' || e.data?.type !== 'day-starts') return;
+  if (!state.data) return;
+  state.dayStarts = e.data.dayStarts ?? [];
+  updateVotesPreview();
 });
 
 loadGames().then(render).catch(showErr);

@@ -68,6 +68,19 @@ functional skeleton to wire up and test against a real channel.
   Note it shows *actions only* - it does not compute outcomes (who died,
   whether a kill was blocked), because that depends on per-game role rules
   the app does not model.
+- **Votes tab** (`dashboard/votes/`): the day-phase companion to the night
+  tracker above - a separate, static, no-backend app
+  ([Mafia-Vote-Parser](https://github.com/Felipegbq95/Mafia-Vote-Parser))
+  ported in unchanged and run in its own iframe, so its behavior (and its
+  own test suite) stay exactly what they are standalone. Paste a forum
+  thread's "Print" view in and it detects the day, roster, and majority
+  threshold, tallies `VOTE:`/`UNVOTE` posts, and produces ready-to-post
+  BBCode. The only addition on its side is a `postMessage` of the "Day N
+  Start" timestamps it already detects, which the dashboard offers to turn
+  into night windows (`nights.started_at`/`ends_at`) - night N's window is
+  `[Day N's timestamp, Day N+1's timestamp)`, since Discord's private night
+  channels never see day-phase forum content either way. Nothing is written
+  until you review the detected windows and click Save.
 
 ## Security model
 
