@@ -202,8 +202,8 @@ main, .page-header { max-width: 1716px; }
 .graph-tip .tip-line { font-size: 0.82rem; }
 .graph-tip .tip-result { color: var(--warn); font-weight: 600; }
 
-/* votes tab - the vote counter runs in its own iframe (ported in unchanged),
-   so it needs no styling of its own beyond a sized, framed container. */
-.votes-frame-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
-  overflow: hidden; }
-.votes-frame { width: 100%; height: 900px; border: none; display: block; }
+/* votes app - runs in its own iframe (ported in unchanged), deliberately
+   unstyled/unframed (no card, no border) and height-synced to its real
+   content in app.js, so it reads as its own page rather than an embed - the
+   backgrounds already match (#0c0e1a both), so the seam is invisible. */
+.votes-frame { width: 100%; border: none; display: block; }

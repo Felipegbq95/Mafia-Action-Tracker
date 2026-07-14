@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713j';
-import { parseMessage, isRecordableAction } from './parser.js?v=20260713j';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713k';
+import { parseMessage, isRecordableAction } from './parser.js?v=20260713k';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -398,8 +398,20 @@ function deriveNightWindows(dayStarts) {
 // reload the vote counter out from under the host's pasted-in thread.
 function renderVotes() {
   const wrap = h('div', { class: 'stack' });
-  wrap.appendChild(h('div', { class: 'votes-frame-wrap' },
-    h('iframe', { class: 'votes-frame', src: 'votes/index.html', title: 'Vote counter' })));
+  const iframe = h('iframe', { class: 'votes-frame', src: 'votes/index.html', title: 'Vote counter' });
+  // No card/border around it and no fixed height with its own scrollbar -
+  // same-origin (it's served from this same site, just a subfolder), so the
+  // height can track its real content and the page scrolls naturally, same
+  // as visiting the standalone app directly instead of it feeling embedded.
+  const syncHeight = () => {
+    const doc = iframe.contentDocument;
+    if (doc?.documentElement) iframe.style.height = `${doc.documentElement.scrollHeight}px`;
+  };
+  iframe.addEventListener('load', () => {
+    syncHeight();
+    new iframe.contentWindow.ResizeObserver(syncHeight).observe(iframe.contentDocument.documentElement);
+  });
+  wrap.appendChild(iframe);
   wrap.appendChild(h('div', { class: 'editor', id: 'votes-night-preview', hidden: true }));
   return wrap;
 }
