@@ -4,7 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Night Action Tracker</title>
-  <link rel="stylesheet" href="style.css?v=20260713i" />
+  <!-- Same favicon and fonts as the Votes app (dashboard/votes/), so the two
+       apps sharing a game/PIN read as one family. -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=3" />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png?v=3" />
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png?v=3" />
+  <link rel="alternate icon" href="favicon.ico?v=3" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=3" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@500;600;700&family=Work+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=20260713j" />
 </head>
 <body>
   <header class="page-header">
@@ -41,6 +51,7 @@
         <button id="scrape-btn" class="ghost" type="button" hidden>Scrape now</button>
         <button id="finish-btn" class="ghost danger" type="button" hidden>Finish game</button>
       </div>
+      <div id="app-switcher" class="app-switcher"></div>
       <p id="scrape-status" class="scrape-status" hidden></p>
       <nav id="tabs" class="tabs"></nav>
       <div id="panel"></div>
@@ -50,6 +61,6 @@
   <!-- The ?v= query busts GitHub Pages' asset cache on each release, so an
        already-open tab picks up new features (like board changes) without a
        manual hard-refresh. Bump it whenever the dashboard changes. -->
-  <script type="module" src="app.js?v=20260713i"></script>
+  <script type="module" src="app.js?v=20260713j"></script>
 </body>
 </html>

@@ -3,20 +3,26 @@
   --border: rgba(255,255,255,0.06); --text: #e8e9f3; --text-dim: #9497b3;
   --accent: #e0454f; --accent-hover: #ef5a63; --warn: #eab54e; --ok: #4caf7d;
   --radius: 14px;
+  /* Same three fonts as the Votes app (dashboard/votes/): Lexend for
+     headings/prominent labels, Work Sans for body/UI text, JetBrains Mono
+     for anything code-like (raw message text, PINs). */
+  --font-heading: "Lexend", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: "Work Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; padding: 28px 24px; background: var(--bg); color: var(--text);
-  font-family: system-ui, sans-serif; }
+  font-family: var(--font-sans); }
 main, .page-header { max-width: 1100px; margin: 0 auto; }
 .page-header { margin-bottom: 20px; }
-.page-header h1 { margin: 0 0 4px; }
+.page-header h1 { margin: 0 0 4px; font-family: var(--font-heading); }
 .status { color: var(--text-dim); font-size: 0.9rem; margin: 0; min-height: 1.1em; }
 .status.needs-review { color: var(--accent); }
-h2 { font-size: 1.1rem; margin: 0 0 12px; }
-h3 { font-size: 0.95rem; margin: 0 0 10px; }
+h2 { font-size: 1.1rem; margin: 0 0 12px; font-family: var(--font-heading); }
+h3 { font-size: 0.95rem; margin: 0 0 10px; font-family: var(--font-heading); }
 .muted { color: var(--text-dim); }
-.mono { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 0.82rem; }
+.mono { font-family: var(--font-mono); font-size: 0.82rem; }
 
 /* buttons + inputs */
 button { cursor: pointer; font: inherit; border-radius: 10px; border: 1px solid var(--border);
@@ -60,6 +66,15 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .night-tab.add { padding: 6px 10px; }
 .scrape-status { margin: -4px 0 12px; font-size: 0.85rem; color: var(--text-dim); }
 .scrape-status.needs-review { color: var(--accent); }
+/* App switcher: picks between the two apps sharing this game/PIN (the night
+   Tracker and the Votes app), deliberately bolder/more separated than the
+   .tabs row below it, which only switches sub-views within one app. */
+.app-switcher { display: flex; gap: 8px; margin-bottom: 18px; padding-bottom: 18px;
+  border-bottom: 1px solid var(--border); }
+.app-switch { padding: 10px 20px; font-size: 0.95rem; font-weight: 600; font-family: var(--font-heading);
+  color: var(--text-dim); background: var(--panel); border: 1px solid var(--border); border-radius: 999px; }
+.app-switch:hover { color: var(--text); }
+.app-switch.active { color: #fff; background: var(--accent); border-color: transparent; }
 .tabs { display: flex; gap: 6px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
 .tab { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
   color: var(--text-dim); padding: 8px 12px; }
@@ -71,7 +86,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   background: radial-gradient(circle at 50% 46%, #15172d 0%, #0b0d18 72%);
   border: 1px solid var(--border); border-radius: 18px; }
 .graph { width: 100%; height: auto; display: block; }
-.node-label { fill: var(--text); font-size: 18px; font-weight: 600; font-family: system-ui, sans-serif; }
+.node-label { fill: var(--text); font-size: 18px; font-weight: 600; font-family: var(--font-heading); }
 /* Its own panel to the left of the board (like the details panel on the
    right), not overlaid on top of the graph. */
 .graph-legend { width: 220px; flex: none; display: flex; flex-direction: column; gap: 6px;

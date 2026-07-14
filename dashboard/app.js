@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713i';
-import { parseMessage, isRecordableAction } from './parser.js?v=20260713i';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713j';
+import { parseMessage, isRecordableAction } from './parser.js?v=20260713j';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -83,9 +83,12 @@ const state = {
   night: 1, tab: 'board', selectedActionId: null, hoverPlayerId: null, error: '',
   // legend multi-select: ability ids ('' = unresolved) isolated on the board
   abilitySel: new Set(),
-  // day-start timestamps posted up by the embedded vote counter (Votes tab),
+  // day-start timestamps posted up by the embedded vote counter (Votes app),
   // used to offer auto-filling night windows; see the message listener below.
   dayStarts: [],
+  // 'tracker' (Board/Sheet/Actions/Players/Abilities/Settings) or 'votes' -
+  // two separate apps sharing one game/PIN, not sub-tabs of one app.
+  section: 'tracker',
 };
 
 // ---- dom helpers ----------------------------------------------------------
@@ -137,13 +140,13 @@ async function refresh() {
 }
 async function openGame(gameId, pin) {
   state.gameId = gameId; state.pin = pin; state.readOnly = false;
-  state.abilitySel = new Set(); state.dayStarts = [];
+  state.abilitySel = new Set(); state.dayStarts = []; state.section = 'tracker';
   $('scrape-status').hidden = true;
   await refresh(); render();
 }
 async function openPublic(gameId) {
   state.gameId = gameId; state.pin = null; state.readOnly = true;
-  state.abilitySel = new Set(); state.dayStarts = [];
+  state.abilitySel = new Set(); state.dayStarts = []; state.section = 'tracker';
   $('scrape-status').hidden = true;
   await refresh(); render();
 }
@@ -220,12 +223,44 @@ async function createGame() {
 }
 
 // ---- game shell -----------------------------------------------------------
+// Two apps share one game/PIN: the night Tracker (Board/Sheet/Actions/
+// Players/Abilities/Settings, all keyed by night number) and the Votes app
+// (the ported vote counter, keyed by day - see renderVotes). The switcher
+// below picks between them; each keeps its own furniture (night selector +
+// sub-tabs for the tracker, nothing but its own iframe for votes) rather
+// than living inside a shared tab row, so they read as separate apps.
+const SECTIONS = [
+  { id: 'tracker', label: 'Night Tracker' },
+  { id: 'votes', label: 'Vote Counter' },
+];
+
 function renderGame() {
   const g = state.data.game;
   $('game-name').textContent = g.name;
   $('ro-badge').hidden = !state.readOnly;
   $('finish-btn').hidden = state.readOnly;
-  $('scrape-btn').hidden = state.readOnly;
+
+  const switcher = $('app-switcher'); switcher.innerHTML = '';
+  for (const s of SECTIONS) {
+    switcher.appendChild(h('button', { class: 'app-switch' + (state.section === s.id ? ' active' : ''),
+      onclick: () => { state.section = s.id; render(); } }, s.label));
+  }
+
+  const inTracker = state.section === 'tracker';
+  $('scrape-btn').hidden = state.readOnly || !inTracker;
+  $('night-tabs').hidden = !inTracker;
+  $('tabs').hidden = !inTracker;
+  // Transient scrape/re-match status: force-hidden while away from the
+  // tracker; left alone (not resurrected) on return, same as any toast
+  // naturally going stale once you've navigated elsewhere.
+  if (!inTracker) $('scrape-status').hidden = true;
+
+  const panel = $('panel'); panel.innerHTML = '';
+  if (!inTracker) {
+    panel.appendChild(renderVotes());
+    updateVotesPreview();
+    return;
+  }
 
   const nt = $('night-tabs'); nt.innerHTML = '';
   for (const n of nightNumbers()) {
@@ -240,8 +275,8 @@ function renderGame() {
   }
 
   const tabs = state.readOnly
-    ? ['board', 'sheet', 'votes']
-    : ['board', 'sheet', 'actions', 'players', 'abilities', 'votes', 'settings'];
+    ? ['board', 'sheet']
+    : ['board', 'sheet', 'actions', 'players', 'abilities', 'settings'];
   if (!tabs.includes(state.tab)) state.tab = 'board';
   const nav = $('tabs'); nav.innerHTML = '';
   for (const t of tabs) {
@@ -249,13 +284,11 @@ function renderGame() {
       onclick: () => { state.tab = t; render(); } }, t[0].toUpperCase() + t.slice(1)));
   }
 
-  const panel = $('panel'); panel.innerHTML = '';
   if (state.tab === 'board') panel.appendChild(renderBoard());
   else if (state.tab === 'sheet') panel.appendChild(renderSheet());
   else if (state.tab === 'actions') panel.appendChild(renderActionsEditor());
   else if (state.tab === 'players') panel.appendChild(renderPlayersEditor());
   else if (state.tab === 'abilities') panel.appendChild(renderAbilitiesEditor());
-  else if (state.tab === 'votes') { panel.appendChild(renderVotes()); updateVotesPreview(); }
   else if (state.tab === 'settings') panel.appendChild(renderSettings());
 }
 
