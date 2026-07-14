@@ -1,6 +1,6 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713g';
-import { parseMessage, isRecordableAction } from './parser.js?v=20260713g';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js?v=20260713h';
+import { parseMessage, isRecordableAction } from './parser.js?v=20260713h';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -847,6 +847,13 @@ function sheetRow(p, editable) {
     const accent = ctAccent(a);
     return accent ? `border-left:3px solid ${accent}; padding-left:6px;` : '';
   };
+  // If someone redirected or roleblocked THIS player tonight, their own
+  // target stays exactly what they submitted (never overwritten/inferred) -
+  // a small badge flags that the real outcome may differ. Doesn't say what
+  // it changed to; see the "Targeted by" columns for that.
+  const redirected = incoming.some((a) => a.computable_type === 'redirect');
+  const roleblocked = incoming.some((a) => a.computable_type === 'roleblock');
+
   const actionCell = h('td', { class: 'sheet-cell' });
   const targetCell = h('td', { class: 'sheet-cell' });
   for (const a of outgoing) {
@@ -866,6 +873,10 @@ function sheetRow(p, editable) {
   if (!outgoing.length) {
     actionCell.appendChild(h('span', { class: 'muted small' }, '-'));
     targetCell.appendChild(h('span', { class: 'muted small' }, '-'));
+  } else if (redirected || roleblocked) {
+    targetCell.appendChild(h('div', { class: 'sheet-badges' },
+      redirected ? h('span', { class: 'ct-pill', title: 'Someone redirected this player tonight' }, '↻ redirected') : null,
+      roleblocked ? h('span', { class: 'ct-pill', title: 'Someone roleblocked this player tonight' }, '✕ roleblocked') : null));
   }
 
   const byCell = h('td', { class: 'sheet-cell' });

@@ -161,6 +161,11 @@ main, .page-header { max-width: 1716px; }
 .sheet-line.sheet-readonly { color: var(--text-dim); cursor: pointer; padding: 4px 0; }
 .sheet-line.sheet-readonly:hover { color: var(--text); }
 .sheet-x { padding: 2px 7px; line-height: 1; color: var(--accent); }
+/* redirected/roleblocked badges: the player's own target stays exactly what
+   they submitted; this just flags that the real outcome may differ. */
+.sheet-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.ct-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: rgba(234,179,8,0.16); color: #eab308; }
 .sheet-group td { background: var(--panel-raised); font-weight: 600; font-size: 0.78rem;
   text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 12px; }
 /* "+ action" lives in its own slim column at the end of the row instead of
