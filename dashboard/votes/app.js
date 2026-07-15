@@ -742,8 +742,18 @@ function parseForumThread(rawText, { fallbackRoster = [], targetDay = null, alia
         .filter(Boolean)
     );
 
-    if (SYSTEM_SIGNATURE_RE.test(post.content)) {
-      const dayMatch = post.content.match(DAY_START_RE);
+    // Quotes are stripped before the system-signature check (not just before
+    // vote parsing) so that a player replying to -- or quoting -- a mod's
+    // "Vote Count"/"Alive Player List"/"Day N Start" post doesn't get their
+    // own reply misclassified as a mod post and skipped outright. Without
+    // this, quoting the vote count to comment on it silently drops the
+    // player's own vote and activity for that post, with no debug trace.
+    const contentBold = bold.slice(post.contentAbsStart, post.contentAbsEnd);
+    const contentQuoted = quoted.slice(post.contentAbsStart, post.contentAbsEnd);
+    const cleaned = stripQuotes(post.content, contentBold, contentQuoted, postMap);
+
+    if (SYSTEM_SIGNATURE_RE.test(cleaned.text)) {
+      const dayMatch = cleaned.text.match(DAY_START_RE);
       if (dayMatch) {
         const newDay = parseInt(dayMatch[1], 10);
         if (targetDay != null && dayNumber === targetDay && newDay !== targetDay) {
@@ -778,9 +788,6 @@ function parseForumThread(rawText, { fallbackRoster = [], targetDay = null, alia
       postCounts.set(key, (postCounts.get(key) || 0) + 1);
     }
 
-    const contentBold = bold.slice(post.contentAbsStart, post.contentAbsEnd);
-    const contentQuoted = quoted.slice(post.contentAbsStart, post.contentAbsEnd);
-    const cleaned = stripQuotes(post.content, contentBold, contentQuoted, postMap);
     const action = findLastAction(cleaned.text, roster, aliasMap, requireBold, cleaned.bold);
     if (!action) continue;
 

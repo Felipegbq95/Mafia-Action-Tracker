@@ -190,6 +190,28 @@ test("forum format: quoted old vote is not re-counted as a new vote", () => {
   assert.deepEqual(result.tallies[0].voters, ["Alice"]);
 });
 
+test("forum format: quoting a mod's vote-count post doesn't get the reply itself mistaken for a mod post", () => {
+  // A player quoting a mod's "Vote Count"/"Alive Player List" post to
+  // comment on it is common. The quoted text still contains those trigger
+  // phrases, so if the system-post check runs before quotes are stripped,
+  // the player's own reply -- including their own new vote -- gets silently
+  // treated as a mod post and skipped entirely.
+  const log =
+    forumPost("Bobsal", "May 1, 2026, 1:00:00 PM", "Day 1 Start\n\nAlive Player List\n\n1. Alice\n2. Bob\n3. Carol\n\nWith 3 players alive it will take 2 to achieve majority.") +
+    forumPost("Bobsal", "May 1, 2026, 2:00:00 PM", "Day 1 Vote Count\nAlice(1): Bob") +
+    forumPost(
+      "Carol",
+      "May 1, 2026, 2:05:00 PM",
+      "Quote from: Bobsal on May 1, 2026, 2:00:00 PM\nDay 1 Vote Count\nAlice(1): Bob\n\nvote alice"
+    );
+
+  const result = parseVotes(log, "");
+  assert.equal(result.tallies.length, 1);
+  assert.equal(result.tallies[0].display, "Alice");
+  assert.deepEqual(result.tallies[0].voters, ["Carol"]);
+  assert.equal(result.activity.find((a) => a.name === "Carol").posts, 1);
+});
+
 test("forum format: mod recap posts (Vote Count / Alive Player List) are not scanned for votes", () => {
   const log =
     forumPost("Bobsal", "May 1, 2026, 1:00:00 PM", "Day 1 Start\n\nAlive Player List\n\n1. Alice\n2. Bob\n\nWith 2 players alive it will take 2 to achieve majority.") +
