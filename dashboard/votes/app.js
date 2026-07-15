@@ -467,9 +467,9 @@ const DAY_START_RE = /Day\s+(\d+)\s+Start/i;
 // the numbering can be relied on to find the end of the block, so it's
 // terminated on the first blank line instead -- the roster is always a
 // tight run of consecutive lines with no gaps.
-const ROSTER_BLOCK_RE = /Alive Player List\s*[-:]?\s*\r?\n([\s\S]*?)\r?\n\s*\r?\n/i;
+const ROSTER_BLOCK_RE = /Alive Player List\s*[-:]?\s*\r?\n([\s\S]*?)\r?\n\s*\r?\n/gi;
 const ROSTER_LINE_RE = /^\s*\d+[.,]\s*(.+?)\s*$/gm;
-const MAJORITY_RE = /With\s+\d+\s+players?\s+alive\s+it\s+will\s+take\s+(\d+)\s+to\s+achieve\s+majority/i;
+const MAJORITY_RE = /With\s+\d+\s+players?\s+alive\s+it\s+will\s+take\s+(\d+)\s+to\s+achieve\s+majority/gi;
 
 function looksLikeForumThread(text) {
   return /Post by:\s*.+\s+on\s+.+/.test(text);
@@ -686,18 +686,20 @@ function parseForumThread(rawText, { fallbackRoster = [], targetDay = null, alia
   let dayFound = targetDay == null;
   const debug = [];
 
-  // The alive roster and majority threshold live in a single mod post that
-  // gets edited in place every time someone dies, rather than reposted --
-  // so a fresh paste of the thread only ever contains one such block, and
-  // it's often one of the very first posts (sometimes before any "Day N
-  // Start" announcement exists yet). Matching it once against the whole
-  // thread up front, independent of the day-tracking loop below, finds it
-  // regardless of which day is requested or how early it sits -- gating it
-  // on "day number seen so far" (as a prior version did) could miss it
-  // entirely for a post that predates the first day announcement.
+  // The alive roster and majority threshold either live in a single mod post
+  // that gets edited in place every time someone dies (never reposted), or
+  // get freshly reposted on every vote-count post -- both conventions show
+  // up in practice. Taking the LAST match in the whole pasted thread handles
+  // both: for an edited-in-place post there's only ever one match, so "last"
+  // is the same as "first"; for a repost-every-time game, "last" is the most
+  // current roster/majority instead of a stale one from the first post seen.
+  // This mirrors how the day-tracking loop below already always prefers the
+  // latest day, so "paste the whole thread each time" behaves consistently
+  // across day number, roster, and majority alike.
   let roster = fallbackRoster.slice();
   let majority = null;
-  const rosterMatch = cleanText.match(ROSTER_BLOCK_RE);
+  const rosterMatches = [...cleanText.matchAll(ROSTER_BLOCK_RE)];
+  const rosterMatch = rosterMatches[rosterMatches.length - 1];
   if (rosterMatch) {
     const names = [];
     let lm;
@@ -716,7 +718,8 @@ function parseForumThread(rawText, { fallbackRoster = [], targetDay = null, alia
     }
     if (names.length) roster = names;
   }
-  const majorityMatch = cleanText.match(MAJORITY_RE);
+  const majorityMatches = [...cleanText.matchAll(MAJORITY_RE)];
+  const majorityMatch = majorityMatches[majorityMatches.length - 1];
   if (majorityMatch) majority = parseInt(majorityMatch[1], 10);
 
   // Some games (e.g. a non-standard Day 1 mechanic instead of majority

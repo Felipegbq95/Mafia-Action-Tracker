@@ -215,6 +215,24 @@ test("forum format: a later Day N Start resets the tally", () => {
   assert.deepEqual(result.tallies[0].voters, ["Bob"]);
 });
 
+test("forum format: roster and majority reflect the latest repost, not the first, when the host reposts a fresh block on every vote count", () => {
+  // Some hosts don't edit a single canonical post in place -- they repost a
+  // brand new "Alive Player List" + majority sentence on every vote-count
+  // post as players die. A fresh paste of the whole thread then contains
+  // several such blocks; the roster/majority shown must reflect the most
+  // recent one, matching how the day number itself always tracks the latest
+  // "Day N Start" seen.
+  const log =
+    forumPost("Bobsal", "May 1, 2026, 1:00:00 PM", "Day 1 Start\n\nAlive Player List\n\n1. Alice\n2. Bob\n3. Carol\n4. Dave\n\nWith 4 players alive it will take 3 to achieve majority.") +
+    forumPost("Bobsal", "May 2, 2026, 1:00:00 PM", "Day 1 Vote Count\n\nAlive Player List\n\n1. Alice\n2. Bob\n3. Carol\n4. Dave\n\nWith 4 players alive it will take 3 to achieve majority.") +
+    forumPost("Bobsal", "May 3, 2026, 1:00:00 PM", "Day 2 Start\n\nAlive Player List\n\n1. Alice\n2. Bob\n3. Carol\n\nWith 3 players alive it will take 2 to achieve majority.") +
+    forumPost("Bobsal", "May 4, 2026, 1:00:00 PM", "Day 2 Vote Count\n\nAlive Player List\n\n1. Alice\n2. Bob\n3. Carol\n\nWith 3 players alive it will take 2 to achieve majority.");
+
+  const result = parseVotes(log, "");
+  assert.equal(result.majority, 2);
+  assert.deepEqual(result.notVoting, ["Alice", "Bob", "Carol"]);
+});
+
 test("forum format: an unresolved vote target is shown raw in a separate list instead of silently dropped", () => {
   const log =
     forumPost("Bobsal", "May 1, 2026, 1:00:00 PM", "Day 1 Start\n\nAlive Player List\n\n1. Blott\n2. Zorf\n\nWith 2 players alive it will take 2 to achieve majority.") +
