@@ -541,6 +541,55 @@ function extractDayStarts(rawText) {
   return dayStarts;
 }
 
+// The names in the LAST "Alive Player List" block within `text` (or [] if
+// none). Factored out of parseForumThread so the whole-thread roster and the
+// per-day rosters below are pulled the exact same way -- numbered list first,
+// falling back to one bare name per line.
+function extractRosterNames(text) {
+  const matches = [...text.matchAll(ROSTER_BLOCK_RE)];
+  const m = matches[matches.length - 1];
+  if (!m) return [];
+  const names = [];
+  let lm;
+  ROSTER_LINE_RE.lastIndex = 0;
+  while ((lm = ROSTER_LINE_RE.exec(m[1])) !== null) {
+    names.push(stripProfileUrl(stripSentinels(lm[1])));
+  }
+  if (!names.length) {
+    m[1]
+      .split("\n")
+      .map((l) => stripProfileUrl(stripSentinels(l.trim())))
+      .filter(Boolean)
+      .forEach((n) => names.push(n));
+  }
+  return names;
+}
+
+// One alive roster per day, for the embedded Action Tracker to persist per
+// night (day N -> night N, same mapping the night-window feature uses). Walks
+// posts in order tracking the current day off "Day N Start" mod posts (like
+// extractDayStarts); within each day the LAST alive list wins, so a host who
+// edits the opening post down to the current survivors doesn't override a
+// day's own reposted list (that list appears later in the thread). Posts
+// before the first "Day N Start" belong to day 1 (the opening/setup roster).
+function extractDayRosters(rawText) {
+  const { clean: cleanText } = splitMarkedText(rawText);
+  const posts = splitForumPosts(cleanText);
+  const byDay = new Map();
+  let currentDay = 1;
+  for (const post of posts) {
+    if (SYSTEM_SIGNATURE_RE.test(post.content)) {
+      const dayMatch = post.content.match(DAY_START_RE);
+      if (dayMatch) currentDay = parseInt(dayMatch[1], 10);
+    }
+    const names = extractRosterNames(post.content);
+    if (names.length) byDay.set(currentDay, names);
+  }
+  return [...byDay.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([day, roster]) => ({ day, roster }));
+}
+
 // Splits `text` into lines (matching text.split("\n")) alongside the
 // matching slice of a same-length boldness array per line, so line-based
 // operations can carry boldness along without re-deriving positions.
@@ -698,26 +747,8 @@ function parseForumThread(rawText, { fallbackRoster = [], targetDay = null, alia
   // across day number, roster, and majority alike.
   let roster = fallbackRoster.slice();
   let majority = null;
-  const rosterMatches = [...cleanText.matchAll(ROSTER_BLOCK_RE)];
-  const rosterMatch = rosterMatches[rosterMatches.length - 1];
-  if (rosterMatch) {
-    const names = [];
-    let lm;
-    ROSTER_LINE_RE.lastIndex = 0;
-    while ((lm = ROSTER_LINE_RE.exec(rosterMatch[1])) !== null) {
-      names.push(stripProfileUrl(stripSentinels(lm[1])));
-    }
-    if (!names.length) {
-      // Not a numbered list -- fall back to treating every non-blank line
-      // in the block as a bare name.
-      rosterMatch[1]
-        .split("\n")
-        .map((l) => stripProfileUrl(stripSentinels(l.trim())))
-        .filter(Boolean)
-        .forEach((n) => names.push(n));
-    }
-    if (names.length) roster = names;
-  }
+  const names = extractRosterNames(cleanText);
+  if (names.length) roster = names;
   const majorityMatches = [...cleanText.matchAll(MAJORITY_RE)];
   const majorityMatch = majorityMatches[majorityMatches.length - 1];
   if (majorityMatch) majority = parseInt(majorityMatch[1], 10);
@@ -1372,9 +1403,9 @@ if (typeof document !== "undefined") {
     try {
       if (window.parent && window.parent !== window) {
         const dayStarts = extractDayStarts(rawText);
-        const roster = Array.isArray(result.roster) ? result.roster : [];
+        const dayRosters = extractDayRosters(rawText);
         window.parent.postMessage(
-          { source: "mafia-vote-parser", type: "day-starts", dayStarts, roster },
+          { source: "mafia-vote-parser", type: "day-starts", dayStarts, dayRosters },
           "*"
         );
       }
@@ -1410,5 +1441,5 @@ if (typeof document !== "undefined") {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { parseVotes, buildMessage, normalizeTarget, parseAliasMap };
+  module.exports = { parseVotes, buildMessage, normalizeTarget, parseAliasMap, extractDayRosters, extractDayStarts };
 }

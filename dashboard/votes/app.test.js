@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { parseVotes, buildMessage } = require("./app.js");
+const { parseVotes, buildMessage, extractDayRosters } = require("./app.js");
 
 test("basic vote counting", () => {
   const log = [
@@ -235,6 +235,23 @@ test("forum format: a later Day N Start resets the tally", () => {
   assert.equal(result.tallies.length, 1);
   assert.equal(result.tallies[0].display, "Alice");
   assert.deepEqual(result.tallies[0].voters, ["Bob"]);
+});
+
+test("extractDayRosters: one alive roster per day, keyed by day number, last list per day wins", () => {
+  const log =
+    // Opening post edited down to current survivors (as hosts do) - appears
+    // first, so a later day-1 list must override it for day 1.
+    forumPost("Mod", "May 1, 2026, 12:00:00 AM", "Alive Player List\n\nAlice\n\n") +
+    forumPost("Mod", "May 1, 2026, 1:00:00 PM", "Day 1 Start\n\nAlive Player List\n\n1. Alice\n2. Bob\n3. Carol\n4. Dave\n\nWith 4 players alive it will take 3 to achieve majority.") +
+    forumPost("Mod", "May 2, 2026, 1:00:00 PM", "Day 2 Start\n\nAlive Player List\n\n1. Alice\n2. Bob\n3. Carol\n\nWith 3 players alive it will take 2 to achieve majority.") +
+    forumPost("Mod", "May 3, 2026, 1:00:00 PM", "Day 3 Start\n\nAlive Player List\n\n1. Alice\n2. Bob\n\nWith 2 players alive it will take 2 to achieve majority.");
+
+  const byDay = extractDayRosters(log);
+  assert.deepEqual(byDay, [
+    { day: 1, roster: ["Alice", "Bob", "Carol", "Dave"] },
+    { day: 2, roster: ["Alice", "Bob", "Carol"] },
+    { day: 3, roster: ["Alice", "Bob"] },
+  ]);
 });
 
 test("forum format: roster and majority reflect the latest repost, not the first, when the host reposts a fresh block on every vote count", () => {

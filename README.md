@@ -75,24 +75,27 @@ functional skeleton to wire up and test against a real channel.
   own test suite) stay exactly what they are standalone. Paste a forum
   thread's "Print" view in and it detects the day, roster, and majority
   threshold, tallies `VOTE:`/`UNVOTE` posts, and produces ready-to-post
-  BBCode. The only addition on its side is a `postMessage` of the "Day N
-  Start" timestamps and the parsed alive roster it already detects. The
-  timestamps the dashboard offers to turn into night windows
-  (`nights.started_at`/`ends_at`) - night N's window is `[Day N's timestamp,
-  Day N+1's timestamp)`, since Discord's private night channels never see
-  day-phase forum content either way. Nothing is written until you review the
-  detected windows and click Save.
+  BBCode. On its side it also `postMessage`s the "Day N Start" timestamps and
+  a per-day alive roster it detects (see below). The timestamps the dashboard
+  offers to turn into night windows (`nights.started_at`/`ends_at`) - night
+  N's window is `[Day N's timestamp, Day N+1's timestamp)`, since Discord's
+  private night channels never see day-phase forum content either way. Nothing
+  is written until you review the detected windows and click Save.
 - **Alive/dead players**: the Board and Sheet hide dead players so late-game
-  views stay uncluttered. Death is derived automatically from the alive
-  roster the Votes tab parses (a player absent from the latest parsed "Alive
-  Player List" reads as dead) - run the vote counter and the tracker updates.
-  This derivation is ephemeral (it resets on reload until you parse again).
-  Each player also has a persisted manual override in the Players tab
-  (`players.life_override`: `alive`/`dead`, null = follow the roster) for when
-  the tracker's names don't line up with the print's or a death happens
-  off-thread. Dead players stay listed in the Players tab (dimmed, tagged with
-  what the roster resolves them to) so you can still see and override them,
-  and the Actions tab keeps every action editable regardless.
+  views stay uncluttered, per night. When you run the vote counter, it extracts
+  one alive roster per day from the print (`extractDayRosters`) and the
+  dashboard persists each to its night (day N -> night N, `nights.alive_names`)
+  automatically - so the state survives a reload and Night 2's board can show
+  more players alive than Night 5's. A player absent from a night's saved roster
+  reads as dead for that night. Each player also has a persisted manual override
+  in the Players tab (`players.life_override`: `alive`/`dead`, null = follow the
+  roster) that applies across all nights, for when the tracker's names don't
+  line up with the print's or a death happens off-thread. Dead players stay
+  listed in the Players tab (dimmed, tagged with what the current night's roster
+  resolves them to) so you can still see and override them, and the Actions tab
+  keeps every action editable regardless. The roster follows the print's alive
+  list verbatim, so if a host miscounts (leaves a dead name on the list), the
+  override is the fix.
 
 ## Security model
 

@@ -86,11 +86,6 @@ const state = {
   // day-start timestamps posted up by the embedded vote counter (Votes app),
   // used to offer auto-filling night windows; see the message listener below.
   dayStarts: [],
-  // the latest "Alive Player List" the Votes app parsed out of a pasted print,
-  // as short in-game names. Empty = unknown (no print parsed this session), in
-  // which case nobody is auto-hidden. Ephemeral like dayStarts: it resets on
-  // reload until the vote counter is run again. See isPlayerDead below.
-  aliveRoster: [],
   // 'tracker' (Board/Sheet/Actions/Players/Abilities/Settings) or 'votes' -
   // two separate apps sharing one game/PIN, not sub-tabs of one app.
   section: 'tracker',
@@ -145,13 +140,13 @@ async function refresh() {
 }
 async function openGame(gameId, pin) {
   state.gameId = gameId; state.pin = pin; state.readOnly = false;
-  state.abilitySel = new Set(); state.dayStarts = []; state.aliveRoster = []; state.section = 'tracker';
+  state.abilitySel = new Set(); state.dayStarts = []; state.section = 'tracker';
   $('scrape-status').hidden = true;
   await refresh(); render();
 }
 async function openPublic(gameId) {
   state.gameId = gameId; state.pin = null; state.readOnly = true;
-  state.abilitySel = new Set(); state.dayStarts = []; state.aliveRoster = []; state.section = 'tracker';
+  state.abilitySel = new Set(); state.dayStarts = []; state.section = 'tracker';
   $('scrape-status').hidden = true;
   await refresh(); render();
 }
@@ -180,17 +175,22 @@ function rosterHasPlayer(roster, p) {
   });
 }
 
-// A player is dead when their manual override says so, or - with no override -
-// when a print has been parsed this session (aliveRoster non-empty) and they
-// aren't on it. With no override and no parsed roster, everyone reads alive.
-function isPlayerDead(p) {
+// The persisted alive roster for a given night (short in-game names the Votes
+// app parsed and saved, day N -> night N). Empty = unknown for that night.
+const nightRoster = (n = state.night) =>
+  nights().find((x) => x.night_number === n)?.alive_names ?? [];
+
+// A player is dead (for a given night) when their manual override says so, or -
+// with no override - when that night has a saved roster and they aren't on it.
+// No override and no roster for the night => everyone reads alive.
+function isPlayerDead(p, n = state.night) {
   if (p.life_override === 'dead') return true;
   if (p.life_override === 'alive') return false;
-  const roster = state.aliveRoster;
-  if (!roster || !roster.length) return false;
+  const roster = nightRoster(n);
+  if (!roster.length) return false;
   return !rosterHasPlayer(roster, p);
 }
-const alivePlayers = () => players().filter((p) => !isPlayerDead(p));
+const alivePlayers = (n = state.night) => players().filter((p) => !isPlayerDead(p, n));
 const abilities = () => state.data?.abilities ?? [];
 const actions = () => state.data?.actions ?? [];
 const nightActions = () => actions().filter((a) => a.night_number === state.night);
@@ -1147,10 +1147,10 @@ function renderPlayersEditor() {
     p_game_id: state.gameId, p_pin: state.pin, p_player_id: null,
     p_display_name: 'New player', p_channel_name: null, p_aliases: [], p_alignment: null,
   })) }, '+ Add player'));
-  if (state.aliveRoster.length) {
+  if (nightRoster().length) {
     wrap.appendChild(h('p', { class: 'muted small' },
-      `Auto-hiding players not on the latest parsed alive list (${state.aliveRoster.length} alive). `
-      + 'Status "auto" follows the print; set "alive"/"dead" to override it.'));
+      `Night ${state.night}: auto-hiding players not on its saved alive list (${nightRoster().length} alive). `
+      + 'Status "auto" follows the print per night; set "alive"/"dead" to override it everywhere.'));
   }
   for (const p of players()) {
     const save = (patch) => mutate(() => rpc('upsert_player', {
@@ -1176,7 +1176,7 @@ function renderPlayersEditor() {
       [{ value: 'alive', label: 'alive' }, { value: 'dead', label: 'dead' }],
       p.life_override, (v) => save({ life_override: v || null }), { placeholder: 'auto' });
     const dead = isPlayerDead(p);
-    const autoTag = (!p.life_override && state.aliveRoster.length)
+    const autoTag = (!p.life_override && nightRoster().length)
       ? h('span', { class: `life-tag ${dead ? 'dead' : 'alive'}` }, dead ? 'auto: dead' : 'auto: alive')
       : null;
     const row = h('div', { class: 'editor row players-row' + (dead ? ' player-dead' : '') },
@@ -1319,20 +1319,36 @@ $('scrape-btn').addEventListener('click', async () => {
 // the pasted forum print, once per "Count Votes" click - updated in place
 // (not via the full render() pipeline) so the iframe itself is never
 // recreated/reloaded out from under the host's pasted-in thread.
-window.addEventListener('message', (e) => {
+window.addEventListener('message', async (e) => {
   if (e.data?.source !== 'mafia-vote-parser' || e.data?.type !== 'day-starts') return;
   if (!state.data) return;
   state.dayStarts = e.data.dayStarts ?? [];
-  // The alive roster drives auto-hiding of dead players (see isPlayerDead).
-  // A parse that finds no roster sends [], which safely means "unknown" and
-  // hides nobody.
-  state.aliveRoster = Array.isArray(e.data.roster) ? e.data.roster : [];
   updateVotesPreview();
+  // Persist each day's alive roster to its night (day N -> night N) so dead
+  // players stay hidden across reloads and per night, not just this session.
+  // Editor only: a read-only viewer has no PIN to write with. refresh() pulls
+  // the saved rosters back into state.data without re-rendering (so the Votes
+  // iframe the user is looking at is left intact).
+  const dayRosters = Array.isArray(e.data.dayRosters) ? e.data.dayRosters : [];
+  if (!state.readOnly && dayRosters.length) {
+    try {
+      for (const dr of dayRosters) {
+        if (!Number.isFinite(dr?.day) || !Array.isArray(dr?.roster) || !dr.roster.length) continue;
+        await rpc('upsert_night_roster', {
+          p_game_id: state.gameId, p_pin: state.pin, p_night: dr.day, p_alive_names: dr.roster,
+        });
+      }
+      await refresh();
+      state.error = '';
+    } catch (err) {
+      state.error = err.message || String(err);
+    }
+  }
   // This message fires while the user is on the Votes tab (they just clicked
   // Count Votes), where a full render() would recreate the iframe and wipe
   // their pasted thread - so only re-render if somehow already on the tracker.
-  // Otherwise the Board/Sheet pick up the new roster on the next navigation to
-  // the tracker, which itself calls render().
+  // Otherwise the Board/Sheet pick up the saved rosters on the next navigation
+  // to the tracker, which itself calls render().
   if (state.section === 'tracker') render();
 });
 

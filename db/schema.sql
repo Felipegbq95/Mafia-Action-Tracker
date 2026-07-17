@@ -99,6 +99,11 @@ create table if not exists nights (
   ends_at timestamptz,
   primary key (game_id, night_number)
 );
+-- Who is alive during this night, as the short in-game names the Votes app
+-- parses out of the print's "Alive Player List" (day N -> night N). Persists
+-- the auto-derived roster so it survives a reload and applies per night rather
+-- than globally. Null/empty = unknown for that night (nobody auto-hidden).
+alter table nights add column if not exists alive_names text[];
 
 -- Free-text per-player, per-night summary, edited in the dashboard's Sheet
 -- tab ("Night results" column). Deliberately not tied to any single action's
@@ -213,7 +218,7 @@ as $$
       from players p where p.game_id = p_game_id), '[]'::json),
     'nights', coalesce((select json_agg(json_build_object(
         'night_number', n.night_number, 'started_at', n.started_at,
-        'ends_at', n.ends_at) order by n.night_number)
+        'ends_at', n.ends_at, 'alive_names', n.alive_names) order by n.night_number)
       from nights n where n.game_id = p_game_id), '[]'::json),
     'night_notes', coalesce((select json_agg(json_build_object(
         'night_number', nn.night_number, 'player_id', nn.player_id, 'note', nn.note))
@@ -513,6 +518,24 @@ begin
 end;
 $$;
 grant execute on function upsert_night(uuid, text, int, timestamptz, timestamptz) to anon, authenticated;
+
+-- Sets only a night's alive roster, leaving its window (started_at/ends_at)
+-- untouched - the mirror of upsert_night, which sets only the window. Called
+-- automatically when the Votes app parses a print, one row per day it found.
+create or replace function upsert_night_roster(
+  p_game_id uuid, p_pin text, p_night int, p_alive_names text[])
+returns void
+language plpgsql security definer set search_path = public, extensions, pg_temp
+as $$
+begin
+  perform assert_game_pin(p_game_id, p_pin);
+  insert into nights (game_id, night_number, alive_names)
+  values (p_game_id, greatest(1, p_night), coalesce(p_alive_names, '{}'))
+  on conflict (game_id, night_number)
+  do update set alive_names = excluded.alive_names;
+end;
+$$;
+grant execute on function upsert_night_roster(uuid, text, int, text[]) to anon, authenticated;
 
 -- Per-player, per-night free-text note (Sheet tab's "Night results" column).
 create or replace function upsert_night_note(
