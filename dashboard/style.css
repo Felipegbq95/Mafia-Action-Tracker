@@ -122,6 +122,15 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .stack { display: flex; flex-direction: column; gap: 12px; }
 .editor { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
 .editor.row { display: grid; grid-template-columns: 1.2fr 1fr 1.4fr auto; gap: 12px; align-items: end; }
+.editor.row.players-row { grid-template-columns: 1.2fr 1fr 1.4fr auto auto auto; }
+/* Auto/dead players stay listed here (so you can override them) but read as
+   dimmed, matching how they vanish from the Board/Sheet. */
+.editor.row.player-dead { opacity: 0.55; }
+.life-field { display: flex; align-items: center; gap: 8px; }
+.life-tag { font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+  padding: 2px 6px; border-radius: 999px; white-space: nowrap; }
+.life-tag.dead { background: rgba(229, 115, 115, 0.16); color: #e57373; }
+.life-tag.alive { background: rgba(129, 199, 132, 0.16); color: #81c784; }
 .editor-head { display: flex; justify-content: space-between; align-items: center; }
 .field { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; }
 .field-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
@@ -138,6 +147,7 @@ textarea { background: var(--panel-raised); border: 1px solid var(--border); bor
   .web-view { flex-direction: column; }
   .details { width: auto; max-height: none; }
   .editor.row { grid-template-columns: 1fr 1fr; }
+  .editor.row.players-row { grid-template-columns: 1fr 1fr; }
 }
 
 /* night window rows (Settings) */

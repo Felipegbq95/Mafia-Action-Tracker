@@ -76,11 +76,23 @@ functional skeleton to wire up and test against a real channel.
   thread's "Print" view in and it detects the day, roster, and majority
   threshold, tallies `VOTE:`/`UNVOTE` posts, and produces ready-to-post
   BBCode. The only addition on its side is a `postMessage` of the "Day N
-  Start" timestamps it already detects, which the dashboard offers to turn
-  into night windows (`nights.started_at`/`ends_at`) - night N's window is
-  `[Day N's timestamp, Day N+1's timestamp)`, since Discord's private night
-  channels never see day-phase forum content either way. Nothing is written
-  until you review the detected windows and click Save.
+  Start" timestamps and the parsed alive roster it already detects. The
+  timestamps the dashboard offers to turn into night windows
+  (`nights.started_at`/`ends_at`) - night N's window is `[Day N's timestamp,
+  Day N+1's timestamp)`, since Discord's private night channels never see
+  day-phase forum content either way. Nothing is written until you review the
+  detected windows and click Save.
+- **Alive/dead players**: the Board and Sheet hide dead players so late-game
+  views stay uncluttered. Death is derived automatically from the alive
+  roster the Votes tab parses (a player absent from the latest parsed "Alive
+  Player List" reads as dead) - run the vote counter and the tracker updates.
+  This derivation is ephemeral (it resets on reload until you parse again).
+  Each player also has a persisted manual override in the Players tab
+  (`players.life_override`: `alive`/`dead`, null = follow the roster) for when
+  the tracker's names don't line up with the print's or a death happens
+  off-thread. Dead players stay listed in the Players tab (dimmed, tagged with
+  what the roster resolves them to) so you can still see and override them,
+  and the Actions tab keeps every action editable regardless.
 
 ## Security model
 

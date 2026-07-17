@@ -86,6 +86,11 @@ const state = {
   // day-start timestamps posted up by the embedded vote counter (Votes app),
   // used to offer auto-filling night windows; see the message listener below.
   dayStarts: [],
+  // the latest "Alive Player List" the Votes app parsed out of a pasted print,
+  // as short in-game names. Empty = unknown (no print parsed this session), in
+  // which case nobody is auto-hidden. Ephemeral like dayStarts: it resets on
+  // reload until the vote counter is run again. See isPlayerDead below.
+  aliveRoster: [],
   // 'tracker' (Board/Sheet/Actions/Players/Abilities/Settings) or 'votes' -
   // two separate apps sharing one game/PIN, not sub-tabs of one app.
   section: 'tracker',
@@ -140,13 +145,13 @@ async function refresh() {
 }
 async function openGame(gameId, pin) {
   state.gameId = gameId; state.pin = pin; state.readOnly = false;
-  state.abilitySel = new Set(); state.dayStarts = []; state.section = 'tracker';
+  state.abilitySel = new Set(); state.dayStarts = []; state.aliveRoster = []; state.section = 'tracker';
   $('scrape-status').hidden = true;
   await refresh(); render();
 }
 async function openPublic(gameId) {
   state.gameId = gameId; state.pin = null; state.readOnly = true;
-  state.abilitySel = new Set(); state.dayStarts = []; state.section = 'tracker';
+  state.abilitySel = new Set(); state.dayStarts = []; state.aliveRoster = []; state.section = 'tracker';
   $('scrape-status').hidden = true;
   await refresh(); render();
 }
@@ -159,6 +164,33 @@ async function mutate(fn) {
 
 // ---- helpers on current data ----------------------------------------------
 const players = () => state.data?.players ?? [];
+
+// Does the parsed alive roster (short in-game names) contain this player?
+// Matches the roster name against the player's display name AND aliases with
+// the same bidirectional prefix test the Votes app uses to line up forum
+// usernames with roster names, so the two apps agree on who's alive.
+function rosterHasPlayer(roster, p) {
+  const cands = [p.display_name, ...(p.aliases ?? [])]
+    .map((s) => (s ?? '').trim().toLowerCase())
+    .filter(Boolean);
+  return roster.some((rn) => {
+    const r = (rn ?? '').trim().toLowerCase();
+    if (!r) return false;
+    return cands.some((c) => c === r || c.startsWith(r) || r.startsWith(c));
+  });
+}
+
+// A player is dead when their manual override says so, or - with no override -
+// when a print has been parsed this session (aliveRoster non-empty) and they
+// aren't on it. With no override and no parsed roster, everyone reads alive.
+function isPlayerDead(p) {
+  if (p.life_override === 'dead') return true;
+  if (p.life_override === 'alive') return false;
+  const roster = state.aliveRoster;
+  if (!roster || !roster.length) return false;
+  return !rosterHasPlayer(roster, p);
+}
+const alivePlayers = () => players().filter((p) => !isPlayerDead(p));
 const abilities = () => state.data?.abilities ?? [];
 const actions = () => state.data?.actions ?? [];
 const nightActions = () => actions().filter((a) => a.night_number === state.night);
@@ -458,7 +490,9 @@ function renderBoard() {
 }
 
 function drawGraph() {
-  const roster = players();
+  // Dead players drop off the ring entirely; actions to/from them then fall
+  // out of `drawable` below via the idIndex.has() guard, so nothing dangles.
+  const roster = alivePlayers();
   const na = nightActions();
   const idIndex = new Map(roster.map((p, i) => [p.id, i]));
   const W = 1400, H = 1000, cx = W / 2, cy = H / 2, nodeR = 13;
@@ -942,7 +976,7 @@ function renderSheet() {
   const groups = [...SHEET_ALIGN_ORDER, null]; // null = unaligned, shown last
   const colspan = editable ? '7' : '6';
   for (const al of groups) {
-    const group = players()
+    const group = alivePlayers()
       .filter((p) => (al === null ? !p.alignment : p.alignment === al))
       .sort((a, b) => a.display_name.localeCompare(b.display_name));
     if (!group.length) continue;
@@ -954,13 +988,25 @@ function renderSheet() {
   }
   table.appendChild(tbody);
   wrap.appendChild(table);
-  if (!players().length) wrap.appendChild(h('p', { class: 'muted' }, 'No players yet - add some in the Players tab.'));
+  if (!players().length) {
+    wrap.appendChild(h('p', { class: 'muted' }, 'No players yet - add some in the Players tab.'));
+  } else if (!alivePlayers().length) {
+    wrap.appendChild(h('p', { class: 'muted' },
+      'Every player is marked dead. Parse a current print in the Votes tab, or clear a player\'s status in the Players tab.'));
+  }
   return wrap;
 }
 
 function sheetRow(p, editable) {
-  const outgoing = nightActions().filter((a) => a.actor_player_id === p.id);
-  const incoming = nightActions().filter((a) => a.target_player_id === p.id);
+  // Actions whose other end is a dead player are hidden from the sheet, the
+  // same way the board drops them - so a killed player's name never shows up
+  // in a living player's "Targeted by" cell. A null endpoint (unresolved /
+  // unassigned) isn't a hidden player, so it stays. The Actions tab keeps the
+  // full unfiltered list for editing.
+  const aliveIds = new Set(alivePlayers().map((x) => x.id));
+  const shownEndpoint = (id) => id == null || aliveIds.has(id);
+  const outgoing = nightActions().filter((a) => a.actor_player_id === p.id && shownEndpoint(a.target_player_id));
+  const incoming = nightActions().filter((a) => a.target_player_id === p.id && shownEndpoint(a.actor_player_id));
   const playerOpts = players().map((x) => ({ value: x.id, label: x.display_name }));
   // Option labels favor the ability's EFFECT over its raw name, same as the
   // board's tooltips - "action", not "ability name".
@@ -1101,6 +1147,11 @@ function renderPlayersEditor() {
     p_game_id: state.gameId, p_pin: state.pin, p_player_id: null,
     p_display_name: 'New player', p_channel_name: null, p_aliases: [], p_alignment: null,
   })) }, '+ Add player'));
+  if (state.aliveRoster.length) {
+    wrap.appendChild(h('p', { class: 'muted small' },
+      `Auto-hiding players not on the latest parsed alive list (${state.aliveRoster.length} alive). `
+      + 'Status "auto" follows the print; set "alive"/"dead" to override it.'));
+  }
   for (const p of players()) {
     const save = (patch) => mutate(() => rpc('upsert_player', {
       p_game_id: state.gameId, p_pin: state.pin, p_player_id: p.id,
@@ -1108,6 +1159,7 @@ function renderPlayersEditor() {
       p_channel_name: patch.channel ?? p.channel_name,
       p_aliases: patch.aliases ?? p.aliases,
       p_alignment: 'alignment' in patch ? patch.alignment : (p.alignment ?? null),
+      p_life_override: 'life_override' in patch ? patch.life_override : (p.life_override ?? null),
     }));
     const name = h('input', { value: p.display_name });
     name.addEventListener('change', () => save({ name: name.value }));
@@ -1117,11 +1169,23 @@ function renderPlayersEditor() {
     aliases.addEventListener('change', () => save({ aliases: aliases.value.split(',').map((s) => s.trim()).filter(Boolean) }));
     const align = selectEl(ALIGN_ORDER.map((a) => ({ value: a, label: ALIGN_LABEL[a] })),
       p.alignment, (v) => save({ alignment: v || null }), { placeholder: 'no alignment' });
-    wrap.appendChild(h('div', { class: 'editor row' },
+    // Status: '' = follow the print (auto), 'alive'/'dead' = force it. When on
+    // auto, a tag shows what the print currently resolves to so a hidden
+    // player is still visible-and-explained here in the Players tab.
+    const status = selectEl(
+      [{ value: 'alive', label: 'alive' }, { value: 'dead', label: 'dead' }],
+      p.life_override, (v) => save({ life_override: v || null }), { placeholder: 'auto' });
+    const dead = isPlayerDead(p);
+    const autoTag = (!p.life_override && state.aliveRoster.length)
+      ? h('span', { class: `life-tag ${dead ? 'dead' : 'alive'}` }, dead ? 'auto: dead' : 'auto: alive')
+      : null;
+    const row = h('div', { class: 'editor row players-row' + (dead ? ' player-dead' : '') },
       field('Name', name), field('Channel', chan), field('Aliases', aliases),
       field('Alignment', align),
+      field('Status', h('div', { class: 'life-field' }, status, autoTag)),
       h('button', { class: 'ghost danger small', onclick: () => mutate(() =>
-        rpc('delete_player', { p_game_id: state.gameId, p_pin: state.pin, p_player_id: p.id })) }, 'Delete')));
+        rpc('delete_player', { p_game_id: state.gameId, p_pin: state.pin, p_player_id: p.id })) }, 'Delete'));
+    wrap.appendChild(row);
   }
   return wrap;
 }
@@ -1259,7 +1323,17 @@ window.addEventListener('message', (e) => {
   if (e.data?.source !== 'mafia-vote-parser' || e.data?.type !== 'day-starts') return;
   if (!state.data) return;
   state.dayStarts = e.data.dayStarts ?? [];
+  // The alive roster drives auto-hiding of dead players (see isPlayerDead).
+  // A parse that finds no roster sends [], which safely means "unknown" and
+  // hides nobody.
+  state.aliveRoster = Array.isArray(e.data.roster) ? e.data.roster : [];
   updateVotesPreview();
+  // This message fires while the user is on the Votes tab (they just clicked
+  // Count Votes), where a full render() would recreate the iframe and wipe
+  // their pasted thread - so only re-render if somehow already on the tracker.
+  // Otherwise the Board/Sheet pick up the new roster on the next navigation to
+  // the tracker, which itself calls render().
+  if (state.section === 'tracker') render();
 });
 
 loadGames().then(render).catch(showErr);

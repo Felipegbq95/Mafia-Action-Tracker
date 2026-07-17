@@ -1364,13 +1364,19 @@ if (typeof document !== "undefined") {
     resultsSection.hidden = false;
 
     // Non-invasive: tell a parent Action Tracker frame (if embedded) about
-    // detected day boundaries. No-op when opened standalone (window.parent
+    // detected day boundaries and the current alive roster (the parsed "Alive
+    // Player List"), so the host can auto-fill night windows and hide dead
+    // players from its board/sheet. No-op when opened standalone (window.parent
     // === window, so postMessage would just talk to itself and nothing
     // listens) or if anything here throws for any reason.
     try {
       if (window.parent && window.parent !== window) {
         const dayStarts = extractDayStarts(rawText);
-        window.parent.postMessage({ source: "mafia-vote-parser", type: "day-starts", dayStarts }, "*");
+        const roster = Array.isArray(result.roster) ? result.roster : [];
+        window.parent.postMessage(
+          { source: "mafia-vote-parser", type: "day-starts", dayStarts, roster },
+          "*"
+        );
       }
     } catch (e) {
       // ignore - never let this break the vote counter's own rendering
