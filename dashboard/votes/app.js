@@ -541,13 +541,14 @@ function extractDayStarts(rawText) {
   return dayStarts;
 }
 
-// The names in the LAST "Alive Player List" block within `text` (or [] if
-// none). Factored out of parseForumThread so the whole-thread roster and the
-// per-day rosters below are pulled the exact same way -- numbered list first,
-// falling back to one bare name per line.
-function extractRosterNames(text) {
+// The names in an "Alive Player List" block within `text` (or [] if none).
+// `which` picks the LAST block (default -- parseForumThread wants the current
+// day's roster/majority) or the FIRST block (the maintained top-of-thread list
+// the Action Tracker uses -- see extractFirstRoster). Both are pulled the same
+// way: numbered list first, falling back to one bare name per line.
+function extractRosterNames(text, which = "last") {
   const matches = [...text.matchAll(ROSTER_BLOCK_RE)];
-  const m = matches[matches.length - 1];
+  const m = which === "first" ? matches[0] : matches[matches.length - 1];
   if (!m) return [];
   const names = [];
   let lm;
@@ -565,29 +566,19 @@ function extractRosterNames(text) {
   return names;
 }
 
-// One alive roster per day, for the embedded Action Tracker to persist per
-// night (day N -> night N, same mapping the night-window feature uses). Walks
-// posts in order tracking the current day off "Day N Start" mod posts (like
-// extractDayStarts); within each day the LAST alive list wins, so a host who
-// edits the opening post down to the current survivors doesn't override a
-// day's own reposted list (that list appears later in the thread). Posts
-// before the first "Day N Start" belong to day 1 (the opening/setup roster).
-function extractDayRosters(rawText) {
+// The current alive roster and which night it applies to, for the embedded
+// Action Tracker. Uses the FIRST "Alive Player List" in the thread -- forums
+// keep a maintained alive list in the opening/early mod post, edited down as
+// players die, so it reflects the current survivors. That list applies to the
+// current night (the latest "Day N Start" seen, else 1) and, since players
+// don't revive, every night after it too -- the tracker forward-fills it. A
+// freshly reposted print with a newer alive list overrides from its night on.
+function extractFirstRoster(rawText) {
   const { clean: cleanText } = splitMarkedText(rawText);
-  const posts = splitForumPosts(cleanText);
-  const byDay = new Map();
-  let currentDay = 1;
-  for (const post of posts) {
-    if (SYSTEM_SIGNATURE_RE.test(post.content)) {
-      const dayMatch = post.content.match(DAY_START_RE);
-      if (dayMatch) currentDay = parseInt(dayMatch[1], 10);
-    }
-    const names = extractRosterNames(post.content);
-    if (names.length) byDay.set(currentDay, names);
-  }
-  return [...byDay.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([day, roster]) => ({ day, roster }));
+  const roster = extractRosterNames(cleanText, "first");
+  const dayStarts = extractDayStarts(rawText);
+  const night = dayStarts.length ? Math.max(...dayStarts.map((d) => d.day)) : 1;
+  return { roster, night };
 }
 
 // Splits `text` into lines (matching text.split("\n")) alongside the
@@ -1403,9 +1394,9 @@ if (typeof document !== "undefined") {
     try {
       if (window.parent && window.parent !== window) {
         const dayStarts = extractDayStarts(rawText);
-        const dayRosters = extractDayRosters(rawText);
+        const { roster: currentRoster, night: currentNight } = extractFirstRoster(rawText);
         window.parent.postMessage(
-          { source: "mafia-vote-parser", type: "day-starts", dayStarts, dayRosters },
+          { source: "mafia-vote-parser", type: "day-starts", dayStarts, currentRoster, currentNight },
           "*"
         );
       }
@@ -1441,5 +1432,5 @@ if (typeof document !== "undefined") {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { parseVotes, buildMessage, normalizeTarget, parseAliasMap, extractDayRosters, extractDayStarts };
+  module.exports = { parseVotes, buildMessage, normalizeTarget, parseAliasMap, extractFirstRoster, extractDayStarts };
 }

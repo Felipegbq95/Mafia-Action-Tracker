@@ -454,6 +454,36 @@ end;
 $$;
 grant execute on function delete_action(uuid, text, uuid) to anon, authenticated;
 
+-- A player can re-submit an action by re-typing and re-bolding it. They may
+-- also have several distinct actions, so we can't just keep their single
+-- latest message - we supersede per ABILITY: for each (actor, night, ability)
+-- only the most recently posted scraped action survives; older ones are
+-- deleted. Only scraped rows with a resolved actor AND ability are touched, so
+-- shared-channel rows awaiting actor assignment and manual rows are left alone.
+-- Runs after a scrape and on Re-match; returns how many rows it removed.
+create or replace function supersede_actions(p_game_id uuid, p_pin text)
+returns int
+language plpgsql security definer set search_path = public, extensions, pg_temp
+as $$
+declare v_deleted int;
+begin
+  perform assert_game_pin(p_game_id, p_pin);
+  with ranked as (
+    select id, row_number() over (
+      partition by game_id, night_number, actor_player_id, ability_id
+      order by posted_at desc nulls last, created_at desc
+    ) as rn
+    from actions
+    where game_id = p_game_id and source = 'scraped'
+      and actor_player_id is not null and ability_id is not null
+  )
+  delete from actions where id in (select id from ranked where rn > 1);
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+grant execute on function supersede_actions(uuid, text) to anon, authenticated;
+
 -- game settings -------------------------------------------------------------
 create or replace function set_game_pin(p_game_id uuid, p_pin text, p_new_pin text)
 returns void

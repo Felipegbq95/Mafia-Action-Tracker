@@ -82,20 +82,28 @@ functional skeleton to wire up and test against a real channel.
   private night channels never see day-phase forum content either way. Nothing
   is written until you review the detected windows and click Save.
 - **Alive/dead players**: the Board and Sheet hide dead players so late-game
-  views stay uncluttered, per night. When you run the vote counter, it extracts
-  one alive roster per day from the print (`extractDayRosters`) and the
-  dashboard persists each to its night (day N -> night N, `nights.alive_names`)
-  automatically - so the state survives a reload and Night 2's board can show
-  more players alive than Night 5's. A player absent from a night's saved roster
-  reads as dead for that night. Each player also has a persisted manual override
-  in the Players tab (`players.life_override`: `alive`/`dead`, null = follow the
-  roster) that applies across all nights, for when the tracker's names don't
-  line up with the print's or a death happens off-thread. Dead players stay
-  listed in the Players tab (dimmed, tagged with what the current night's roster
-  resolves them to) so you can still see and override them, and the Actions tab
-  keeps every action editable regardless. The roster follows the print's alive
-  list verbatim, so if a host miscounts (leaves a dead name on the list), the
-  override is the fix.
+  views stay uncluttered. When you run the vote counter, it reads the *first*
+  "Alive Player List" in the thread (`extractFirstRoster`) - forums keep a
+  maintained alive list in the opening/early mod post, edited down as players
+  die, so it reflects the current survivors - and the dashboard saves it
+  (`nights.alive_names`) to the night the print is current at (the latest "Day N
+  Start" seen). Because players don't revive, that roster then applies to that
+  night and every night after it (`nightRoster` forward-fills the most recent
+  saved roster at or before a night); a freshly reposted print with a newer list
+  overrides from its night onward. It survives reloads. Each player also has a
+  persisted manual override in the Players tab (`players.life_override`:
+  `alive`/`dead`, null = follow the roster) that applies across all nights, for
+  when the tracker's names don't line up with the print's or a death happens
+  off-thread. Dead players stay listed in the Players tab (dimmed, tagged) so
+  you can still see and override them, and the Actions tab keeps every action
+  editable regardless.
+- **Re-submitted actions**: a player can change an action by re-typing and
+  re-bolding it, and may have several distinct actions at once, so overriding is
+  per *ability*: `supersede_actions` keeps only the most recently posted scraped
+  action per (actor, night, ability) and deletes the older ones (their other,
+  different-ability actions are untouched). It runs after a scrape and on
+  Re-match. Only resolved scraped rows are touched - shared-channel rows still
+  awaiting an actor, and manual rows, are left alone.
 
 ## Security model
 

@@ -175,10 +175,20 @@ function rosterHasPlayer(roster, p) {
   });
 }
 
-// The persisted alive roster for a given night (short in-game names the Votes
-// app parsed and saved, day N -> night N). Empty = unknown for that night.
-const nightRoster = (n = state.night) =>
-  nights().find((x) => x.night_number === n)?.alive_names ?? [];
+// The alive roster in effect for a given night. The Votes app saves the
+// maintained top-of-thread alive list to the night the print is current at;
+// since players don't revive, it applies to that night and every night after,
+// until a newer print overrides from a later night. So the roster for night n
+// is the one saved at the greatest night <= n (forward-fill). Empty = no
+// print parsed yet at or before this night -> nobody auto-hidden.
+const nightRoster = (n = state.night) => {
+  let best = null;
+  for (const x of nights()) {
+    if ((x.alive_names?.length ?? 0) && x.night_number <= n
+      && (!best || x.night_number > best.night_number)) best = x;
+  }
+  return best ? best.alive_names : [];
+};
 
 // A player is dead (for a given night) when their manual override says so, or -
 // with no override - when that night has a saved roster and they aren't on it.
@@ -700,10 +710,34 @@ function effectLabel(a) {
 // siblings later. Shown to the host as-is, that means every split-off action
 // displays the same giant multi-line blob instead of just its own line. This
 // re-parses raw_text and picks out only this row's own span for display.
+// The other rows split out of the same multi-action message (mafia channel
+// posting the whole faction's night at once): same raw_text, channel, night.
+function spanSiblings(a) {
+  return actions().filter((x) =>
+    x.raw_text === a.raw_text && x.source_channel === a.source_channel
+    && x.night_number === a.night_number);
+}
+// Which line/span of the message this row represents, by its position among
+// its siblings in creation order. Robust even when the stored span_index is
+// stale - old rows split via upsert_action all got span_index 0, which made
+// every sibling display (and re-resolve as) the FIRST action. Siblings are
+// always created in span order (both the scraper and the split button), so
+// created_at order == span order; span_index and id only break ties.
+function spanOrdinal(a) {
+  const sibs = spanSiblings(a);
+  if (sibs.length <= 1) return 0;
+  sibs.sort((x, y) =>
+    (new Date(x.created_at ?? 0) - new Date(y.created_at ?? 0))
+    || ((x.span_index ?? 0) - (y.span_index ?? 0))
+    || String(x.id).localeCompare(String(y.id)));
+  const idx = sibs.findIndex((x) => x.id === a.id);
+  return idx >= 0 ? idx : (a.span_index ?? 0);
+}
+
 function spanRawText(a) {
   if (!a.raw_text) return a.raw_text;
   const spans = parseMessage(a.raw_text, players(), abilities()).filter(isRecordableAction);
-  return spans[a.span_index ?? 0]?.raw ?? a.raw_text;
+  return spans[spanOrdinal(a)]?.raw ?? a.raw_text;
 }
 
 function renderPlayerDetails(pid) {
@@ -824,7 +858,7 @@ async function rematchAll() {
         split += 1;
       }
     }
-    const span = spans[a.span_index ?? 0] ?? spans[0] ?? null;
+    const span = spans[spanOrdinal(a)] ?? spans[0] ?? null;
     const ability = a.ability_id ?? span?.ability.id ?? null;
     const target = a.target_player_id ?? span?.target.player?.id ?? null;
     // if night windows are set and we know when the message was posted,
@@ -853,7 +887,11 @@ async function rematchAll() {
     });
     updated += 1;
   }
-  return { scanned: targets.length, updated, deleted, remaining, split };
+  // Now that actors/abilities are resolved, drop re-submitted duplicates
+  // (latest per actor+ability+night wins).
+  let superseded = 0;
+  try { superseded = await rpc('supersede_actions', { p_game_id: state.gameId, p_pin: state.pin }); } catch { /* non-fatal */ }
+  return { scanned: targets.length, updated, deleted, remaining, split, superseded };
 }
 
 function rematchButton() {
@@ -869,7 +907,8 @@ function rematchButton() {
         st.hidden = false; st.className = 'scrape-status';
         st.textContent = `Re-match: ${r.scanned} unresolved scanned, ${r.updated} updated, `
           + `${r.split} split out of multi-action messages, `
-          + `${r.deleted} mod message(s) removed, ${r.remaining} still need review.`;
+          + `${r.deleted} mod message(s) removed, ${r.superseded} re-submitted superseded, `
+          + `${r.remaining} still need review.`;
       } catch (err) { state.error = err.message || String(err); }
       render();
     } }, 'Re-match');
@@ -1149,8 +1188,8 @@ function renderPlayersEditor() {
   })) }, '+ Add player'));
   if (nightRoster().length) {
     wrap.appendChild(h('p', { class: 'muted small' },
-      `Night ${state.night}: auto-hiding players not on its saved alive list (${nightRoster().length} alive). `
-      + 'Status "auto" follows the print per night; set "alive"/"dead" to override it everywhere.'));
+      `Night ${state.night}: auto-hiding players not on the alive list from the latest print at or before this night (${nightRoster().length} alive). `
+      + 'Status "auto" follows the print; set "alive"/"dead" to override it everywhere.'));
   }
   for (const p of players()) {
     const save = (patch) => mutate(() => rpc('upsert_player', {
@@ -1291,8 +1330,14 @@ $('scrape-btn').addEventListener('click', async () => {
     });
     if (error) throw error;
     if (data?.error) throw new Error(data.error);
+    // Drop actions a player overrode by re-submitting the same ability (keeps
+    // the latest per actor+ability+night); resolved personal-channel actions
+    // supersede immediately, shared-channel ones once their actor is assigned.
+    let superseded = 0;
+    try { superseded = await rpc('supersede_actions', { p_game_id: state.gameId, p_pin: state.pin }); } catch { /* non-fatal */ }
     scrapeStatusEl.textContent =
-      `Scraped ${data.channels} channel(s), ${data.messages} message(s), inserted ${data.inserted} action(s).`;
+      `Scraped ${data.channels} channel(s), ${data.messages} message(s), inserted ${data.inserted} action(s)`
+      + `${superseded ? `, superseded ${superseded} re-submitted` : ''}.`;
     await refresh();
     render();
   } catch (e) {
@@ -1324,20 +1369,18 @@ window.addEventListener('message', async (e) => {
   if (!state.data) return;
   state.dayStarts = e.data.dayStarts ?? [];
   updateVotesPreview();
-  // Persist each day's alive roster to its night (day N -> night N) so dead
-  // players stay hidden across reloads and per night, not just this session.
-  // Editor only: a read-only viewer has no PIN to write with. refresh() pulls
-  // the saved rosters back into state.data without re-rendering (so the Votes
-  // iframe the user is looking at is left intact).
-  const dayRosters = Array.isArray(e.data.dayRosters) ? e.data.dayRosters : [];
-  if (!state.readOnly && dayRosters.length) {
+  // Persist the current alive roster to the night the print is current at, so
+  // dead players stay hidden across reloads. nightRoster() forward-fills it to
+  // later nights. Editor only: a read-only viewer has no PIN to write with.
+  // refresh() pulls the saved roster back into state.data without re-rendering
+  // (so the Votes iframe the user is looking at is left intact).
+  const currentRoster = Array.isArray(e.data.currentRoster) ? e.data.currentRoster : [];
+  const currentNight = Number.isFinite(e.data.currentNight) ? e.data.currentNight : null;
+  if (!state.readOnly && currentRoster.length && currentNight != null) {
     try {
-      for (const dr of dayRosters) {
-        if (!Number.isFinite(dr?.day) || !Array.isArray(dr?.roster) || !dr.roster.length) continue;
-        await rpc('upsert_night_roster', {
-          p_game_id: state.gameId, p_pin: state.pin, p_night: dr.day, p_alive_names: dr.roster,
-        });
-      }
+      await rpc('upsert_night_roster', {
+        p_game_id: state.gameId, p_pin: state.pin, p_night: currentNight, p_alive_names: currentRoster,
+      });
       await refresh();
       state.error = '';
     } catch (err) {
